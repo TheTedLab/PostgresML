@@ -13,6 +13,7 @@
 .idea/**/PostgresML.iml
 .idea/**/.gitignore
 .idea/**/inspectionProfiles
+.idea/**/other.xml
 
 # AWS User-specific
 .idea/**/aws.xml
@@ -233,3 +234,4 @@ src/test/api_data.py
 # Default ignored files
 /shelf/
 /workspace.xml
+/mnist/logs/
