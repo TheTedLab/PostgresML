@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS models_table
 (
     id serial primary key,
     name text,
+    optimizer text,
     model_config jsonb,
     model_weights jsonb
 );
@@ -168,12 +169,16 @@ AS $BODY$
 
     model = keras.models.Sequential([
         Flatten(input_shape=(28, 28)),
-        Dense(64, activation='relu'),
-        Dense(64, activation='relu'),
+        Dense(32, activation='relu'),
+        Dense(32, activation='relu'),
+        Dense(32, activation='relu'),
+        Dense(32, activation='relu'),
         Dense(10, activation='softmax')
     ])
 
-    model.compile(optimizer='SGD',
+    optimizer = 'adam'
+
+    model.compile(optimizer=optimizer,
                   loss='sparse_categorical_crossentropy',
                   metrics=['accuracy'])
 
@@ -191,7 +196,7 @@ AS $BODY$
     history = model.fit(x_train,
                         y_train,
                         epochs=10,
-                        batch_size=64,
+                        batch_size=32,
                         validation_data=(x_test, y_test),
                         verbose=False,
                         callbacks=[logger])
@@ -209,8 +214,8 @@ AS $BODY$
     plpy.notice('json conversions complete')
 
     plpy.execute(
-                    f"insert into models_table (name, model_config, model_weights)"
-                    f"values ('{model_name}', '{json_config}', '{json_weights}')"
+                    f"insert into models_table (name, optimizer, model_config, model_weights)"
+                    f"values ('{model_name}', '{optimizer}', '{json_config}', '{json_weights}')"
     )
 
     return 'All is OK!'
@@ -219,5 +224,72 @@ $BODY$;
 
 BEGIN;
 SELECT * FROM models_table;
-SELECT define_and_save_model('dense-64-x2');
+SELECT define_and_save_model('dense-32-x4');
+ROLLBACK;
+
+CREATE OR REPLACE FUNCTION load_and_test_model(model_name text)
+    RETURNS text
+    LANGUAGE 'plpython3u'
+AS $BODY$
+    import json
+    import keras
+    import numpy as np
+    import tensorflow as tf
+
+    def get_list_from_sql(name, table):
+        data_list = []
+        sql_data = plpy.execute(f"select {name} from {table}")
+        for line in sql_data:
+            data_list.append(list(line.values()))
+        plpy.info(f"{name} loaded!")
+        return np.squeeze(np.asarray(data_list, dtype='float'))
+
+    models_names = plpy.execute(f"select name from models_table")
+    existing_names = []
+    for sql_name in models_names:
+        existing_names.append(sql_name['name'])
+
+    if not model_name in existing_names:
+        return f"Model with name '{model_name} does not exist in the database!'"
+
+    x_test = get_list_from_sql('x_test', 'test_table')
+    y_test = get_list_from_sql('y_test', 'test_table')
+
+    model_config = plpy.execute(f"select model_config from models_table where name = '{model_name}'")
+    new_model = keras.models.model_from_json(model_config[0]['model_config'])
+
+    model_weights = plpy.execute(f"select model_weights from models_table where name = '{model_name}'")
+
+    json_weights = json.loads(model_weights[0]['model_weights'])
+
+    for i in range(len(json_weights)):
+        json_weights[i] = np.array(json_weights[i])
+
+    new_model.set_weights(json_weights)
+
+    new_optimizer = plpy.execute(f"select optimizer from models_table where name = '{model_name}'")
+
+    new_model.compile(optimizer=new_optimizer[0]['optimizer'],
+                  loss='sparse_categorical_crossentropy',
+                  metrics=['accuracy'])
+
+    score = new_model.evaluate(x_test, y_test, verbose=0)
+    plpy.notice(f"Test loss: {score[0]}")
+    plpy.notice(f"Test accuracy: {score[1]}")
+
+    sample_id = 6
+    sample = x_test[sample_id:(sample_id + 1)]
+    plpy.execute(f"select show_sample('test', {sample_id})")
+
+    predict_value = new_model.predict(sample)
+    digit = np.argmax(predict_value)
+    plpy.notice(f"digit = {digit}")
+
+    return 'All is OK!'
+
+$BODY$;
+
+BEGIN;
+SELECT * FROM models_table;
+SELECT load_and_test_model('dense-64-x2');
 ROLLBACK;
