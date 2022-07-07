@@ -1,5 +1,4 @@
 import json
-import psycopg2
 import keras
 import numpy as np
 import tensorflow as tf
@@ -8,8 +7,6 @@ import tensorflow as tf
 (x_train, y_train), (x_test, y_test) = tf.keras.datasets.mnist.load_data()
 x_train = x_train / 255
 x_test = x_test / 255
-
-print(x_test)
 
 # Load new model config from json file
 new_json_file = open('models/model_config.json', 'r')
