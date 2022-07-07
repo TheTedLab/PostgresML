@@ -1,33 +1,41 @@
-create extension plpython3u;
+CREATE EXTENSION plpython3u;
 
-create table if not exists train_table
+CREATE TABLE IF NOT EXISTS train_table
 (
     id serial primary key,
     x_train numeric[28][28] not null,
     y_train integer not null
 );
 
-create table if not exists test_table
+CREATE TABLE IF NOT EXISTS test_table
 (
     id serial primary key,
     x_test numeric[28][28] not null,
     y_train integer not null
 );
 
-create or replace function tf_version()
-returns text
-as $$
+CREATE TABLE IF NOT EXISTS models_table
+(
+    id serial primary key,
+    name text,
+    model_config jsonb,
+    model_weights jsonb
+);
+
+CREATE OR REPLACE FUNCTION tf_version()
+RETURNS text
+LANGUAGE 'plpython3u'
+AS $BODY$
     import tensorflow as tf
     return tf.__version__
-$$
-language 'plpython3u';
+$BODY$;
 
-select tf_version();
+SELECT tf_version();
 
-create or replace function load_mnist()
-    returns void
-    language 'plpython3u'
-as $BODY$
+CREATE OR REPLACE FUNCTION load_mnist()
+    RETURNS void
+    LANGUAGE 'plpython3u'
+AS $BODY$
     import tensorflow as tf
 
 
@@ -70,20 +78,20 @@ as $BODY$
     plpy.notice('---TEST-DATA-LOADED---')
 $BODY$;
 
-begin;
-select load_mnist();
-select * from train_table order by id;
-select * from test_table order by id;
-rollback;
+BEGIN;
+SELECT load_mnist();
+SELECT * from train_table order by id;
+SELECT * from test_table order by id;
+ROLLBACK;
 
-truncate table train_table;
-truncate table test_table;
+TRUNCATE TABLE train_table;
+TRUNCATE TABLE test_table;
 
-create or replace function show_sample(
+CREATE OR REPLACE FUNCTION show_sample(
     sample_table text,
     sample_id integer)
-    returns text
-    language 'plpython3u'
+    RETURNS text
+    LANGUAGE 'plpython3u'
 AS $BODY$
     from math import ceil
 
@@ -107,9 +115,105 @@ AS $BODY$
     return "Successful sample show!"
 $BODY$;
 
-begin;
-select show_sample('train', 0);
-select show_sample('test', 0);
-select show_sample('train_data', 0);
-select show_sample('test', 10000);
-rollback;
+BEGIN;
+SELECT show_sample('train', 0);
+SELECT show_sample('test', 0);
+SELECT show_sample('train_data', 0);
+SELECT show_sample('test', 10000);
+ROLLBACK;
+
+CREATE OR REPLACE FUNCTION test_loading()
+    RETURNS void
+    LANGUAGE 'plpython3u'
+AS $BODY$
+    import numpy as np
+
+    new_train = []
+    train_data = plpy.execute('select x_train from train_table where id <= 10')
+    for line in train_data:
+        new_train.append(list(line.values()))
+    plpy.info(np.squeeze(np.asarray(new_train, dtype='float')))
+
+
+$BODY$;
+
+BEGIN;
+SELECT test_loading();
+ROLLBACK;
+
+CREATE OR REPLACE FUNCTION create_and_save_model()
+    RETURNS text
+    LANGUAGE 'plpython3u'
+AS $BODY$
+    import json
+    import keras
+    import numpy as np
+    import tensorflow as tf
+    from keras.layers import Dense, Flatten
+    from datetime import datetime
+    from tensorflow.python.keras.callbacks import LambdaCallback
+
+    def get_list_from_sql(name, table):
+        data_list = []
+        sql_data = plpy.execute(f"select {name} from {table}")
+        for line in sql_data:
+            data_list.append(list(line.values()))
+        plpy.info(f"{name} loaded!")
+        return np.squeeze(np.asarray(data_list, dtype='float'))
+
+    x_train = get_list_from_sql('x_train', 'train_table')
+    y_train = get_list_from_sql('y_train', 'train_table')
+    x_test = get_list_from_sql('x_test', 'test_table')
+    y_test = get_list_from_sql('y_test', 'test_table')
+
+    model = keras.models.Sequential([
+        Flatten(input_shape=(28, 28)),
+        Dense(128, activation='relu'),
+        Dense(10, activation='softmax')
+    ])
+
+    model.compile(optimizer='adam',
+                  loss='sparse_categorical_crossentropy',
+                  metrics=['accuracy'])
+
+    summary = []
+    model.summary(print_fn=lambda x: summary.append(x))
+    plpy.notice('Model architecture:\n{}'.format('\n'.join(summary)))
+
+    logger = LambdaCallback(
+        on_epoch_end=lambda epoch,
+        logs: plpy.notice('epoch: {}'.format(epoch))
+    )
+
+    plpy.notice('create logger')
+
+    history = model.fit(x_train,
+                        y_train,
+                        epochs=6,
+                        batch_size=128,
+                        validation_data=(x_test, y_test),
+                        verbose=False,
+                        callbacks=[logger])
+
+    plpy.notice('model fit complete')
+
+    json_config = model.to_json()
+    model_weights = model.get_weights()
+
+    for i in range(len(model_weights)):
+        model_weights[i] = model_weights[i].tolist()
+
+    json_weights = json.dumps(model_weights)
+
+    plpy.notice('json conversions complete')
+
+    plpy.execute(f"insert into models_table values (0, 'name', '{json_config}', '{json_weights}')")
+
+    return 'All is OK!'
+
+$BODY$;
+
+BEGIN;
+SELECT * FROM models_table;
+SELECT create_and_save_model();
+ROLLBACK;
