@@ -319,7 +319,7 @@ AS $BODY$
 
     new_optimizer = plpy.execute(f"select optimizer from models_table where name = '{model_name}'")
 
-    new_model.compile(optimizer='adam',
+    new_model.compile(optimizer=new_optimizer[0]['optimizer'],
                   loss='sparse_categorical_crossentropy',
                   metrics=['accuracy'])
 
