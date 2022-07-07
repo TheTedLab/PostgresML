@@ -141,7 +141,7 @@ BEGIN;
 SELECT test_loading();
 ROLLBACK;
 
-CREATE OR REPLACE FUNCTION create_and_save_model()
+CREATE OR REPLACE FUNCTION define_and_save_model(model_name text)
     RETURNS text
     LANGUAGE 'plpython3u'
 AS $BODY$
@@ -168,11 +168,12 @@ AS $BODY$
 
     model = keras.models.Sequential([
         Flatten(input_shape=(28, 28)),
-        Dense(128, activation='relu'),
+        Dense(64, activation='relu'),
+        Dense(64, activation='relu'),
         Dense(10, activation='softmax')
     ])
 
-    model.compile(optimizer='adam',
+    model.compile(optimizer='SGD',
                   loss='sparse_categorical_crossentropy',
                   metrics=['accuracy'])
 
@@ -182,15 +183,15 @@ AS $BODY$
 
     logger = LambdaCallback(
         on_epoch_end=lambda epoch,
-        logs: plpy.notice('epoch: {}'.format(epoch))
+        logs: plpy.notice(f"epoch: {epoch}, accuracy {logs['accuracy']:.4f}, loss: {logs['loss']:.4f}")
     )
 
     plpy.notice('create logger')
 
     history = model.fit(x_train,
                         y_train,
-                        epochs=6,
-                        batch_size=128,
+                        epochs=10,
+                        batch_size=64,
                         validation_data=(x_test, y_test),
                         verbose=False,
                         callbacks=[logger])
@@ -207,7 +208,10 @@ AS $BODY$
 
     plpy.notice('json conversions complete')
 
-    plpy.execute(f"insert into models_table values (0, 'name', '{json_config}', '{json_weights}')")
+    plpy.execute(
+                    f"insert into models_table (name, model_config, model_weights)"
+                    f"values ('{model_name}', '{json_config}', '{json_weights}')"
+    )
 
     return 'All is OK!'
 
@@ -215,5 +219,5 @@ $BODY$;
 
 BEGIN;
 SELECT * FROM models_table;
-SELECT create_and_save_model();
+SELECT define_and_save_model('dense-64-x2');
 ROLLBACK;
