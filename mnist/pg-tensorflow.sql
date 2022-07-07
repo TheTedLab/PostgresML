@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS models_table
 (
     id serial primary key,
     name text,
+    optimizer text,
     model_config jsonb,
     model_weights jsonb
 );
@@ -93,23 +94,29 @@ CREATE OR REPLACE FUNCTION show_sample(
     RETURNS text
     LANGUAGE 'plpython3u'
 AS $BODY$
-    from math import ceil
-
+    import numpy as np
 
     if sample_table in ["train", "test"]:
-        sample = plpy.execute(f"select * from {sample_table}_table where id = {sample_id}")
+        sample = plpy.execute(f"select x_{sample_table} from {sample_table}_table where id = {sample_id}")
+
         if sample.nrows() == 0:
             return f"Index {sample_id} out of data table \"{sample_table}\"."
 
-        mass = sample[0][f"x_{sample_table}"]
-        for line in mass:
+        plpy.info(f"sample_id: {sample_id}")
+
+        sample_list = []
+        for line in sample:
+            sample_list.append(list(line.values()))
+        sample_list = np.squeeze(np.asarray(sample_list, dtype='float'))
+
+        for line in sample_list:
             line_str = ''
             for num in line:
                 if num != 0:
                     line_str += '* '
                 else:
                     line_str += '. '
-            plpy.notice(line_str)
+            plpy.info(line_str)
     else:
         return f"Data table \"{sample_table}\" does not exist!"
     return "Successful sample show!"
@@ -133,15 +140,13 @@ AS $BODY$
     for line in train_data:
         new_train.append(list(line.values()))
     plpy.info(np.squeeze(np.asarray(new_train, dtype='float')))
-
-
 $BODY$;
 
 BEGIN;
 SELECT test_loading();
 ROLLBACK;
 
-CREATE OR REPLACE FUNCTION create_and_save_model()
+CREATE OR REPLACE FUNCTION define_and_save_model(model_name text)
     RETURNS text
     LANGUAGE 'plpython3u'
 AS $BODY$
@@ -172,7 +177,9 @@ AS $BODY$
         Dense(10, activation='softmax')
     ])
 
-    model.compile(optimizer='adam',
+    optimizer = 'adam'
+
+    model.compile(optimizer=optimizer,
                   loss='sparse_categorical_crossentropy',
                   metrics=['accuracy'])
 
@@ -182,7 +189,7 @@ AS $BODY$
 
     logger = LambdaCallback(
         on_epoch_end=lambda epoch,
-        logs: plpy.notice('epoch: {}'.format(epoch))
+        logs: plpy.notice(f"epoch: {epoch}, accuracy {logs['accuracy']:.4f}, loss: {logs['loss']:.4f}")
     )
 
     plpy.notice('create logger')
@@ -207,7 +214,10 @@ AS $BODY$
 
     plpy.notice('json conversions complete')
 
-    plpy.execute(f"insert into models_table values (0, 'name', '{json_config}', '{json_weights}')")
+    plpy.execute(
+                    f"insert into models_table (name, optimizer, model_config, model_weights)"
+                    f"values ('{model_name}', '{optimizer}', '{json_config}', '{json_weights}')"
+    )
 
     return 'All is OK!'
 
@@ -215,5 +225,121 @@ $BODY$;
 
 BEGIN;
 SELECT * FROM models_table;
-SELECT create_and_save_model();
+SELECT define_and_save_model('dense-128-3');
+ROLLBACK;
+
+CREATE OR REPLACE FUNCTION load_and_test_model(model_name text)
+    RETURNS text
+    LANGUAGE 'plpython3u'
+AS $BODY$
+    import json
+    import keras
+    import numpy as np
+    import tensorflow as tf
+
+    def get_list_from_sql(name, table):
+        data_list = []
+        sql_data = plpy.execute(f"select {name} from {table}")
+        for line in sql_data:
+            data_list.append(list(line.values()))
+        plpy.info(f"{name} loaded!")
+        return np.squeeze(np.asarray(data_list, dtype='float'))
+
+    models_names = plpy.execute(f"select name from models_table")
+    existing_names = []
+    for sql_name in models_names:
+        existing_names.append(sql_name['name'])
+
+    if not model_name in existing_names:
+        return f"Model with name '{model_name} does not exist in the database!'"
+
+    x_test = get_list_from_sql('x_test', 'test_table')
+    y_test = get_list_from_sql('y_test', 'test_table')
+
+    model_config = plpy.execute(f"select model_config from models_table where name = '{model_name}'")
+    new_model = keras.models.model_from_json(model_config[0]['model_config'])
+
+    model_weights = plpy.execute(f"select model_weights from models_table where name = '{model_name}'")
+
+    json_weights = json.loads(model_weights[0]['model_weights'])
+
+    for i in range(len(json_weights)):
+        json_weights[i] = np.array(json_weights[i])
+
+    new_model.set_weights(json_weights)
+
+    new_optimizer = plpy.execute(f"select optimizer from models_table where name = '{model_name}'")
+
+    new_model.compile(optimizer=new_optimizer[0]['optimizer'],
+                  loss='sparse_categorical_crossentropy',
+                  metrics=['accuracy'])
+
+    score = new_model.evaluate(x_test, y_test, verbose=0)
+    plpy.notice(f"Test loss: {score[0]}")
+    plpy.notice(f"Test accuracy: {score[1]}")
+
+    return 'All is OK!'
+
+$BODY$;
+
+BEGIN;
+SELECT * FROM models_table;
+SELECT load_and_test_model('dense-128-3');
+ROLLBACK;
+
+CREATE OR REPLACE FUNCTION test_random_sample(model_name text)
+    RETURNS text
+    LANGUAGE 'plpython3u'
+AS $BODY$
+    import json
+    import keras
+    import random
+    import numpy as np
+    import tensorflow as tf
+
+    models_names = plpy.execute(f"select name from models_table")
+    existing_names = []
+    for sql_name in models_names:
+        existing_names.append(sql_name['name'])
+
+    if not model_name in existing_names:
+        return f"Model with name '{model_name} does not exist in the database!'"
+
+    model_config = plpy.execute(f"select model_config from models_table where name = '{model_name}'")
+    new_model = keras.models.model_from_json(model_config[0]['model_config'])
+
+    model_weights = plpy.execute(f"select model_weights from models_table where name = '{model_name}'")
+
+    json_weights = json.loads(model_weights[0]['model_weights'])
+
+    for i in range(len(json_weights)):
+        json_weights[i] = np.array(json_weights[i])
+
+    new_model.set_weights(json_weights)
+
+    new_optimizer = plpy.execute(f"select optimizer from models_table where name = '{model_name}'")
+
+    new_model.compile(optimizer=new_optimizer[0]['optimizer'],
+                  loss='sparse_categorical_crossentropy',
+                  metrics=['accuracy'])
+
+    sample_id = random.randint(0, 9999)
+    sample = plpy.execute(f"select x_test from test_table where id = {sample_id}")
+    sample_list = []
+    for line in sample:
+        sample_list.append(list(line.values()))
+    sample_list = np.squeeze(np.asarray(sample_list, dtype='float'))
+    sample_list = sample_list.reshape(1, 28, 28)
+    plpy.execute(f"select show_sample('test', {sample_id})")
+
+    predict_value = new_model.predict(sample_list)
+    digit = np.argmax(predict_value)
+    plpy.notice(f"digit = {digit}")
+
+    return 'All is OK!'
+$BODY$;
+
+BEGIN;
+SELECT * FROM models_table;
+SELECT test_random_sample('dense-64-x2');
 ROLLBACK;
