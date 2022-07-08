@@ -104,10 +104,7 @@ AS $BODY$
 
         plpy.info(f"sample_id: {sample_id}")
 
-        sample_list = []
-        for line in sample:
-            sample_list.append(list(line.values()))
-        sample_list = np.squeeze(np.asarray(sample_list, dtype='float'))
+        sample_list = np.squeeze(np.asarray([list(line.values()) for line in sample], dtype='float'))
 
         for line in sample_list:
             line_str = ''
@@ -134,12 +131,20 @@ CREATE OR REPLACE FUNCTION test_loading()
     LANGUAGE 'plpython3u'
 AS $BODY$
     import numpy as np
+    import time
 
+    start_time = time.time()
     new_train = []
-    train_data = plpy.execute('select x_train from train_table where id <= 10')
+    train_data = plpy.execute('select x_test from test_table')
     for line in train_data:
         new_train.append(list(line.values()))
-    plpy.info(np.squeeze(np.asarray(new_train, dtype='float')))
+    new_train = np.squeeze(np.asarray(new_train, dtype='float'))
+    plpy.info(f"--- {(time.time() - start_time)} seconds ---")
+
+    start_time = time.time()
+    second_data = plpy.execute('select x_test from test_table')
+    second_train = np.squeeze(np.asarray([list(line.values()) for line in second_data], dtype='float'))
+    plpy.info(f"--- {(time.time() - start_time)} seconds ---")
 $BODY$;
 
 BEGIN;
@@ -341,5 +346,69 @@ $BODY$;
 
 BEGIN;
 SELECT * FROM models_table;
-SELECT test_random_sample('dense-64-x2');
+SELECT test_random_sample('dense-128-3');
 ROLLBACK;
+
+CREATE OR REPLACE FUNCTION test_handwritten_sample(model_name text)
+    RETURNS text
+    LANGUAGE 'plpython3u'
+AS $BODY$
+    import json
+    import keras
+    import numpy as np
+    import tensorflow as tf
+    from tensorflow.keras.preprocessing.image import load_img
+    from tensorflow.keras.preprocessing.image import img_to_array
+    from PIL import Image, ImageChops
+
+    models_names = plpy.execute(f"select name from models_table")
+    existing_names = []
+    for sql_name in models_names:
+        existing_names.append(sql_name['name'])
+
+    if not model_name in existing_names:
+        return f"Model with name '{model_name} does not exist in the database!'"
+
+    model_config = plpy.execute(f"select model_config from models_table where name = '{model_name}'")
+    new_model = keras.models.model_from_json(model_config[0]['model_config'])
+
+    model_weights = plpy.execute(f"select model_weights from models_table where name = '{model_name}'")
+
+    json_weights = json.loads(model_weights[0]['model_weights'])
+
+    for i in range(len(json_weights)):
+        json_weights[i] = np.array(json_weights[i])
+
+    new_model.set_weights(json_weights)
+
+    new_optimizer = plpy.execute(f"select optimizer from models_table where name = '{model_name}'")
+
+    new_model.compile(optimizer=new_optimizer[0]['optimizer'],
+                  loss='sparse_categorical_crossentropy',
+                  metrics=['accuracy'])
+
+    img = load_img('C:\\generatedfiles\\sample_image.png', grayscale=True, target_size=(28, 28))
+    img = ImageChops.invert(img)
+    sample = img_to_array(img)
+    sample = sample / 255
+
+    for line in sample:
+        line_str = ''
+        for num in line:
+            if num != 0:
+                line_str += '* '
+            else:
+                line_str += '. '
+        plpy.info(line_str)
+
+    sample = sample.reshape(1, 28, 28)
+    sample = sample.astype('float')
+
+    predict_value = new_model.predict(sample)
+    digit = np.argmax(predict_value)
+    plpy.notice(f"digit = {digit}")
+
+    return 'All is OK!'
+$BODY$;
+
+SELECT test_handwritten_sample('dense-128-3');
