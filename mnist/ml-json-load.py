@@ -1,6 +1,9 @@
+import os
 import json
 import keras
+import random
 import numpy as np
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 import tensorflow as tf
 
 # Load and normalize MNIST dataset (just for testing samples)
@@ -36,7 +39,8 @@ print("Test loss:", score[0])
 print("Test accuracy:", score[1])
 
 # Test sample
-sample = x_test[3:4]
+sample_slice = random.randint(1, 100)
+sample = x_test[sample_slice:sample_slice + 1]
 for x in sample:
     for line in x:
         for num in line:

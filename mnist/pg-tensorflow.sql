@@ -28,6 +28,11 @@ RETURNS text
 LANGUAGE 'plpython3u'
 AS $BODY$
     import tensorflow as tf
+    plpy.notice(tf.config.list_physical_devices('GPU'))
+    gpu_devices = tf.config.list_physical_devices('GPU')
+    if gpu_devices:
+        details = tf.config.experimental.get_device_details(gpu_devices[0])
+        plpy.notice(details.get('device_name', 'Unknown GPU'))
     return tf.__version__
 $BODY$;
 
@@ -230,7 +235,7 @@ $BODY$;
 
 BEGIN;
 SELECT * FROM models_table;
-SELECT define_and_save_model('dense-128-3');
+SELECT define_and_save_model('dense-128-5');
 ROLLBACK;
 
 CREATE OR REPLACE FUNCTION load_and_test_model(model_name text)
@@ -289,7 +294,7 @@ $BODY$;
 
 BEGIN;
 SELECT * FROM models_table;
-SELECT load_and_test_model('dense-128-3');
+SELECT load_and_test_model('dense-128-5');
 ROLLBACK;
 
 CREATE OR REPLACE FUNCTION test_random_sample(model_name text)
@@ -346,7 +351,7 @@ $BODY$;
 
 BEGIN;
 SELECT * FROM models_table;
-SELECT test_random_sample('dense-128-3');
+SELECT test_random_sample('dense-128-5');
 ROLLBACK;
 
 CREATE OR REPLACE FUNCTION test_handwritten_sample(model_name text)
@@ -411,4 +416,4 @@ AS $BODY$
     return 'All is OK!'
 $BODY$;
 
-SELECT test_handwritten_sample('dense-128-3');
+SELECT test_handwritten_sample('dense-128-5');

@@ -14,6 +14,8 @@
 .idea/**/.gitignore
 .idea/**/inspectionProfiles
 .idea/**/other.xml
+.idea/dataSources.xml
+.idea/sqldialects.xml
 
 # AWS User-specific
 .idea/**/aws.xml
