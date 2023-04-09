@@ -24,9 +24,9 @@ test_loss, test_acc = model_data_aug.evaluate(test_generator, steps=50)
 print(f'Data augmented model accuracy: {test_acc}\nData augmented model loss: {test_loss}')
 
 model_pretrained = models.load_model('models/cats_and_dogs_small_pretrained.h5')
-test_loss, test_acc = model_data_aug.evaluate(test_generator, steps=50)
+test_loss, test_acc = model_pretrained.evaluate(test_generator, steps=50)
 print(f'Pretrained VGG16 model accuracy: {test_acc}\nPretrained VGG16 model loss: {test_loss}')
 
 model_fine_tunning = models.load_model('models/cats_and_dogs_small_fine_tunning.h5')
-test_loss, test_acc = model_data_aug.evaluate(test_generator, steps=50)
+test_loss, test_acc = model_fine_tunning.evaluate(test_generator, steps=50)
 print(f'Fine-tunned VGG16 model accuracy: {test_acc}\nFine-tunned VGG16 model loss: {test_loss}')
