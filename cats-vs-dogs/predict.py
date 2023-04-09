@@ -49,10 +49,10 @@ img = image.image_utils.load_img(img_path, target_size=(150, 150))
 
 plt.imshow(img)
 
-    # Тестовое изображение
+# Тестовое изображение
 x = image.image_utils.img_to_array(img)
 
-    # Переформируем его в (1, 150, 150, 3)
+# Переформируем его в (1, 150, 150, 3)
 x = x.reshape((1,) + x.shape)
 
 predict_value = model_fine_tunning.predict(x)
