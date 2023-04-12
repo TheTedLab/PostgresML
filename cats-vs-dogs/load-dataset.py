@@ -4,7 +4,7 @@ import os, shutil
 
 original_dataset_dir = r'D:\Cats_vs_Dogs\data\train'
 
-base_dir = r'D:\cats_vs_dogs_small'
+base_dir = r'D:\cats_vs_dogs_big'
 os.mkdir(base_dir)
 
 train_dir = os.path.join(base_dir, 'train')
@@ -32,37 +32,37 @@ os.mkdir(test_cats_dir)
 test_dogs_dir = os.path.join(test_dir, 'dogs')
 os.mkdir(test_dogs_dir)
 
-fnames = [f'cat.{i}.jpg' for i in range(1000)]
+fnames = [f'cat.{i}.jpg' for i in range(6250)]
 for fname in fnames:
     src = os.path.join(original_dataset_dir, fname)
     dst = os.path.join(train_cats_dir, fname)
     shutil.copyfile(src, dst)
 
-fnames = [f'cat.{i}.jpg' for i in range(1000, 1500)]
+fnames = [f'cat.{i}.jpg' for i in range(6250, 9375)]
 for fname in fnames:
     src = os.path.join(original_dataset_dir, fname)
     dst = os.path.join(validation_cats_dir, fname)
     shutil.copyfile(src, dst)
 
-fnames = [f'cat.{i}.jpg' for i in range(1500, 2000)]
+fnames = [f'cat.{i}.jpg' for i in range(9375, 12500)]
 for fname in fnames:
     src = os.path.join(original_dataset_dir, fname)
     dst = os.path.join(test_cats_dir, fname)
     shutil.copyfile(src, dst)
 
-fnames = [f'dog.{i}.jpg' for i in range(1000)]
+fnames = [f'dog.{i}.jpg' for i in range(6250)]
 for fname in fnames:
     src = os.path.join(original_dataset_dir, fname)
     dst = os.path.join(train_dogs_dir, fname)
     shutil.copyfile(src, dst)
 
-fnames = [f'dog.{i}.jpg' for i in range(1000, 1500)]
+fnames = [f'dog.{i}.jpg' for i in range(6250, 9375)]
 for fname in fnames:
     src = os.path.join(original_dataset_dir, fname)
     dst = os.path.join(validation_dogs_dir, fname)
     shutil.copyfile(src, dst)
 
-fnames = [f'dog.{i}.jpg' for i in range(1500, 2000)]
+fnames = [f'dog.{i}.jpg' for i in range(9375, 12500)]
 for fname in fnames:
     src = os.path.join(original_dataset_dir, fname)
     dst = os.path.join(test_dogs_dir, fname)

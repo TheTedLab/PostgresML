@@ -26,7 +26,7 @@ for layer in conv_base.layers:
     else:
         layer.trainable = False
 
-base_dir = r'/mnt/d/cats_vs_dogs_small'
+base_dir = r'/mnt/d/cats_vs_dogs_big'
 
 train_dir = os.path.join(base_dir, 'train')
 validation_dir = os.path.join(base_dir, 'validation')
@@ -62,14 +62,14 @@ train_generator = train_datagen.flow_from_directory(
     train_dir,
     # Все изображения будут приведены к размеру 150x150
     target_size=(150, 150),
-    batch_size=20,
+    batch_size=50,
     # Поскольку мы используем binary_crossentropy потерь, нам нужны binary метки
     class_mode='binary')
 
 validation_generator = test_datagen.flow_from_directory(
     validation_dir,
     target_size=(150, 150),
-    batch_size=20,
+    batch_size=25,
     class_mode='binary')
 
 model.compile(loss='binary_crossentropy',
@@ -80,12 +80,12 @@ model.compile(loss='binary_crossentropy',
 
 history = model.fit_generator(
     train_generator,
-    steps_per_epoch=100,
+    steps_per_epoch=125,
     epochs=100,
     validation_data=validation_generator,
-    validation_steps=50)
+    validation_steps=125)
 
-model.save('models/cats_and_dogs_small_fine_tunning.h5')
+model.save('models/cats_and_dogs_big_fine_tunning.h5')
 
 acc = history.history['acc']
 val_acc = history.history['val_acc']
@@ -113,7 +113,7 @@ plt.plot(epochs,
 plt.title('Training and validation accuracy')
 plt.legend()
 
-plt.savefig('resources/fine-tunned-model/train-and-val-acc.png', bbox_inches='tight')
+plt.savefig('resources/fine-tunned-model/big-train-and-val-acc.png', bbox_inches='tight')
 plt.figure()
 
 plt.plot(epochs,
@@ -123,5 +123,5 @@ plt.plot(epochs,
 plt.title('Training and validation loss')
 plt.legend()
 
-plt.savefig('resources/fine-tunned-model/train-and-val-loss.png', bbox_inches='tight')
+plt.savefig('resources/fine-tunned-model/big-train-and-val-loss.png', bbox_inches='tight')
 plt.show()
