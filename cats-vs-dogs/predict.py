@@ -1,5 +1,4 @@
 import os
-import random
 import matplotlib.pyplot as plt
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 from keras import models
@@ -8,9 +7,8 @@ from keras.preprocessing.image import ImageDataGenerator
 
 base_dir = r'/mnt/d/cats_vs_dogs_big'
 test_dir = os.path.join(base_dir, 'test')
-# sample_dir = r'/mnt/d/Cats_vs_Dogs/data/test'
 
-choose = ''
+choose = 'models'
 
 if choose == 'models':
     test_datagen = ImageDataGenerator(rescale=1./255)
@@ -40,24 +38,41 @@ if choose == 'models':
 
 model_fine_tunning = models.load_model('models/cats_and_dogs_big_fine_tunning.h5')
 
-sample_category = 'cats' if random.randint(0, 1) == 0 else 'dogs'
-sample_int = random.randint(9375, 12500)
-sample_str = sample_category[:-1] + '.' + str(sample_int) + '.jpg'
-category_path = os.path.join(test_dir, sample_category)
-img_path = os.path.join(category_path, sample_str)
-img = image.image_utils.load_img(img_path, target_size=(150, 150))
+for sample_int in range(9375, 9380):
+    sample_category = 'cats'
+    sample_str = sample_category[:-1] + '.' + str(sample_int) + '.jpg'
+    category_path = os.path.join(test_dir, sample_category)
+    img_path = os.path.join(category_path, sample_str)
+    img = image.image_utils.load_img(img_path, target_size=(150, 150))
 
-plt.imshow(img)
+    plt.imshow(img)
 
-# Тестовое изображение
-x = image.image_utils.img_to_array(img)
+    # Тестовое изображение
+    x = image.image_utils.img_to_array(img)
 
-# Переформируем его в (1, 150, 150, 3)
-x = x.reshape((1,) + x.shape)
+    # Переформируем его в (1, 150, 150, 3)
+    x = x.reshape((1,) + x.shape)
 
-predict_value = model_fine_tunning.predict(x)
-print(predict_value)
-print(predict_value[0][0])
-print('dog' if predict_value == 1.0 else 'cat')
+    predict_value = model_fine_tunning.predict(x, verbose=0)
+    prediction = 'dog' if predict_value == 1.0 else 'cat'
+    plt.title(prediction)
+    plt.show()
 
-plt.show()
+    sample_category = 'dogs'
+    sample_str = sample_category[:-1] + '.' + str(sample_int) + '.jpg'
+    category_path = os.path.join(test_dir, sample_category)
+    img_path = os.path.join(category_path, sample_str)
+    img = image.image_utils.load_img(img_path, target_size=(150, 150))
+
+    plt.imshow(img)
+
+    # Тестовое изображение
+    x = image.image_utils.img_to_array(img)
+
+    # Переформируем его в (1, 150, 150, 3)
+    x = x.reshape((1,) + x.shape)
+
+    predict_value = model_fine_tunning.predict(x, verbose=0)
+    prediction = 'dog' if predict_value == 1.0 else 'cat'
+    plt.title(prediction)
+    plt.show()
