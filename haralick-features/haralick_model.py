@@ -7,11 +7,11 @@ from tensorflow.python.keras.layers import Conv2D, MaxPooling2D
 from tensorflow.python.keras.layers import Activation, Dropout, Flatten, Dense
 
 # Каталог с данными для обучения
-train_dir = 'resources/digitals/train_dir'
+train_dir = 'resources/target-digitals/train_dir'
 # Каталог с данными для тестирования
-test_dir = 'resources/digitals/test_dir'
+test_dir = 'resources/target-digitals/test_dir'
 # Каталог с данными для тестирования
-val_dir = 'resources/digitals/val_dir'
+val_dir = 'resources/target-digitals/val_dir'
 # Размеры изображения
 img_width, img_height = 4, 6
 # Размерность тензора на основе изображения для входных данных в нейронную сеть
@@ -80,7 +80,7 @@ history = model.fit(
     epochs=epochs,
     shuffle=True)
 
-model.save('haralick_model.h5')
+model.save('models/haralick_model_final.h5')
 
 acc = history.history['acc']
 val_acc = history.history['val_acc']
@@ -108,7 +108,7 @@ plt.plot(epochs,
 plt.title('Training and validation accuracy')
 plt.legend()
 
-plt.savefig('smooth-haralick-model-train-and-val-acc.png', bbox_inches='tight')
+plt.savefig('graphs/final-smooth-haralick-model-train-and-val-acc.png', bbox_inches='tight')
 plt.figure()
 
 plt.plot(epochs,
@@ -118,7 +118,7 @@ plt.plot(epochs,
 plt.title('Training and validation loss')
 plt.legend()
 
-plt.savefig('smooth-haralick-model-train-and-val-loss.png', bbox_inches='tight')
+plt.savefig('graphs/final-smooth-haralick-model-train-and-val-loss.png', bbox_inches='tight')
 plt.show()
 
 test_loss, test_acc = model.evaluate(test_generator, steps=nb_test_samples // batch_size)
