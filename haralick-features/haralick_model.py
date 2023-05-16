@@ -7,11 +7,11 @@ from tensorflow.python.keras.layers import Conv2D, MaxPooling2D
 from tensorflow.python.keras.layers import Activation, Dropout, Flatten, Dense
 
 # Каталог с данными для обучения
-train_dir = 'resources/target-digitals/train_dir'
+train_dir = 'resources/final-digitals/train_dir'
 # Каталог с данными для тестирования
-test_dir = 'resources/target-digitals/test_dir'
+test_dir = 'resources/final-digitals/test_dir'
 # Каталог с данными для тестирования
-val_dir = 'resources/target-digitals/val_dir'
+val_dir = 'resources/final-digitals/val_dir'
 # Размеры изображения
 img_width, img_height = 4, 6
 # Размерность тензора на основе изображения для входных данных в нейронную сеть
@@ -89,6 +89,25 @@ val_loss = history.history['val_loss']
 
 epochs = range(len(acc))
 
+plt.plot(epochs,
+         acc, 'bo', label='Smoothed training acc')
+plt.plot(epochs,
+         val_acc, 'b', label='Smoothed validation acc')
+plt.title('Training and validation accuracy')
+plt.legend()
+
+plt.savefig('graphs/final-haralick-model-train-and-val-acc.png', bbox_inches='tight')
+plt.figure()
+
+plt.plot(epochs,
+         loss, 'bo', label='Smoothed training loss')
+plt.plot(epochs,
+         val_loss, 'b', label='Smoothed validation loss')
+plt.title('Training and validation loss')
+plt.legend()
+
+plt.savefig('graphs/final-haralick-model-train-and-val-loss.png', bbox_inches='tight')
+plt.show()
 
 def smooth_curve(points, factor=0.8):
     smoothed_points = []
