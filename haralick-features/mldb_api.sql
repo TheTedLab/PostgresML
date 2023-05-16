@@ -3,14 +3,14 @@ CREATE EXTENSION plpython3u;
 CREATE TABLE IF NOT EXISTS train_table
 (
     id serial primary key,
-    x_train numeric[28][28] not null,
+    x_train bytea not null,
     y_train integer not null
 );
 
 CREATE TABLE IF NOT EXISTS test_table
 (
     id serial primary key,
-    x_test numeric[28][28] not null,
+    x_test bytea not null,
     y_test integer not null
 );
 
@@ -44,54 +44,30 @@ CREATE OR REPLACE FUNCTION load_mnist()
 AS $BODY$
     import tensorflow as tf
 
-
-    def list_to_pgsql(id, x_lists, y_num):
-        array_str = ''
-        lists_count = len(x_lists)
-        for x_list in x_lists:
-            lists_count -= 1
-            array_str += '{'
-            x_count = len(x_list)
-            for x in x_list:
-                x_count -= 1
-                if x_count > 0:
-                    array_str += str(x) + ', '
-                else:
-                    array_str += str(x)
-            if lists_count > 0:
-                array_str += '}, '
-            else:
-                array_str += '}'
-        return str(id) + ', \'{' + array_str + '}\', ' + str(y_num)
-
-
     (x_train, y_train), (x_test, y_test) = tf.keras.datasets.mnist.load_data()
     x_train = x_train / 255
     x_test = x_test / 255
 
     for i in range(len(x_train)):
-        val_array = list_to_pgsql(i, x_train[i], y_train[i])
-        plpy.execute(f"insert into train_table values ({val_array})")
+        plan = plpy.prepare("insert into train_table values ($1, $2, $3)", ["int", "bytea", "int"])
+        plpy.execute(plan, [i, x_train[i].tobytes(), y_train[i]])
         if i % 600 == 0:
             plpy.notice(f"loaded {i / 600}% train data")
     plpy.notice('---TRAIN-DATA-LOADED---')
 
     for i in range(len(x_test)):
-        val_array = list_to_pgsql(i, x_test[i], y_test[i])
-        plpy.execute(f"insert into test_table values ({val_array})")
+        plan = plpy.prepare("insert into test_table values ($1, $2, $3)", ["int", "bytea", "int"])
+        plpy.execute(plan, [i, x_test[i].tobytes(), y_test[i]])
         if i % 100 == 0:
             plpy.notice(f"loaded {i / 100}% test data")
     plpy.notice('---TEST-DATA-LOADED---')
 $BODY$;
 
-BEGIN;
-SELECT load_mnist();
-SELECT * from train_table order by id;
-SELECT * from test_table order by id;
-ROLLBACK;
-
 TRUNCATE TABLE train_table;
 TRUNCATE TABLE test_table;
+SELECT load_mnist();
+SELECT * FROM train_table ORDER BY id;
+SELECT * FROM test_table ORDER BY id;
 
 CREATE OR REPLACE FUNCTION show_sample(
     sample_table text,
@@ -109,9 +85,10 @@ AS $BODY$
 
         plpy.info(f"sample_id: {sample_id}")
 
-        sample_list = np.squeeze(np.asarray([list(line.values()) for line in sample], dtype='float'))
+        bytes_img = sample[0][f'x_{sample_table}']
+        array_img = np.ndarray(shape=(28, 28), dtype=np.float64, buffer=bytes_img)
 
-        for line in sample_list:
+        for line in array_img:
             line_str = ''
             for num in line:
                 if num != 0:
@@ -124,37 +101,10 @@ AS $BODY$
     return "Successful sample show!"
 $BODY$;
 
-BEGIN;
 SELECT show_sample('train', 0);
 SELECT show_sample('test', 0);
-SELECT show_sample('train_data', 0);
-SELECT show_sample('test', 10000);
-ROLLBACK;
-
-CREATE OR REPLACE FUNCTION test_loading()
-    RETURNS void
-    LANGUAGE 'plpython3u'
-AS $BODY$
-    import numpy as np
-    import time
-
-    start_time = time.time()
-    new_train = []
-    train_data = plpy.execute('select x_test from test_table')
-    for line in train_data:
-        new_train.append(list(line.values()))
-    new_train = np.squeeze(np.asarray(new_train, dtype='float'))
-    plpy.info(f"--- {(time.time() - start_time)} seconds ---")
-
-    start_time = time.time()
-    second_data = plpy.execute('select x_test from test_table')
-    second_train = np.squeeze(np.asarray([list(line.values()) for line in second_data], dtype='float'))
-    plpy.info(f"--- {(time.time() - start_time)} seconds ---")
-$BODY$;
-
-BEGIN;
-SELECT test_loading();
-ROLLBACK;
+SELECT show_sample('train', 10000);
+SELECT show_sample('test', 1000);
 
 CREATE OR REPLACE FUNCTION define_and_save_model(model_name text)
     RETURNS text
@@ -164,15 +114,19 @@ AS $BODY$
     import keras
     import numpy as np
     import tensorflow as tf
-    from keras.layers import Dense, Flatten
+    from keras.layers import Dense, Flatten, Conv2D, MaxPooling2D
     from datetime import datetime
     from tensorflow.python.keras.callbacks import LambdaCallback
 
     def get_list_from_sql(name, table):
         data_list = []
-        sql_data = plpy.execute(f"select {name} from {table}")
-        for line in sql_data:
-            data_list.append(list(line.values()))
+        sql_data = plpy.execute(f"select {name} from {table} order by id")
+        for sample in sql_data:
+            if name not in ['y_train', 'y_test']:
+                array_img = np.ndarray(shape=(28, 28), dtype=np.float64, buffer=sample[f'{name}'])
+                data_list.append(array_img)
+            else:
+                data_list.append(list(sample.values()))
         plpy.info(f"{name} loaded!")
         return np.squeeze(np.asarray(data_list, dtype='float'))
 
@@ -182,7 +136,9 @@ AS $BODY$
     y_test = get_list_from_sql('y_test', 'test_table')
 
     model = keras.models.Sequential([
-        Flatten(input_shape=(28, 28)),
+        Conv2D(32, (3, 3), activation='relu', input_shape=(28, 28, 1)),
+        MaxPooling2D((2, 2)),
+        Flatten(),
         Dense(128, activation='relu'),
         Dense(10, activation='softmax')
     ])
@@ -207,7 +163,7 @@ AS $BODY$
     history = model.fit(x_train,
                         y_train,
                         epochs=6,
-                        batch_size=128,
+                        batch_size=64,
                         validation_data=(x_test, y_test),
                         verbose=False,
                         callbacks=[logger])
@@ -225,17 +181,16 @@ AS $BODY$
     plpy.notice('json conversions complete')
 
     plpy.execute(
-                    f"insert into models_table (name, optimizer, model_config, model_weights)"
-                    f"values ('{model_name}', '{optimizer}', '{json_config}', '{json_weights}')"
+        f"insert into models_table (name, optimizer, model_config, model_weights)"
+        f"values ('{model_name}', '{optimizer}', '{json_config}', '{json_weights}')"
     )
 
     return 'All is OK!'
-
 $BODY$;
 
 BEGIN;
 SELECT * FROM models_table;
-SELECT define_and_save_model('dense-128-5');
+SELECT define_and_save_model('conv2d-2');
 ROLLBACK;
 
 CREATE OR REPLACE FUNCTION load_and_test_model(model_name text)
@@ -249,9 +204,13 @@ AS $BODY$
 
     def get_list_from_sql(name, table):
         data_list = []
-        sql_data = plpy.execute(f"select {name} from {table}")
-        for line in sql_data:
-            data_list.append(list(line.values()))
+        sql_data = plpy.execute(f"select {name} from {table} order by id")
+        for sample in sql_data:
+            if name not in ['y_train', 'y_test']:
+                array_img = np.ndarray(shape=(28, 28), dtype=np.float64, buffer=sample[f'{name}'])
+                data_list.append(array_img)
+            else:
+                data_list.append(list(sample.values()))
         plpy.info(f"{name} loaded!")
         return np.squeeze(np.asarray(data_list, dtype='float'))
 
@@ -260,7 +219,7 @@ AS $BODY$
     for sql_name in models_names:
         existing_names.append(sql_name['name'])
 
-    if not model_name in existing_names:
+    if model_name not in existing_names:
         return f"Model with name '{model_name} does not exist in the database!'"
 
     x_test = get_list_from_sql('x_test', 'test_table')
@@ -289,7 +248,6 @@ AS $BODY$
     plpy.notice(f"Test accuracy: {score[1]}")
 
     return 'All is OK!'
-
 $BODY$;
 
 BEGIN;
@@ -312,7 +270,7 @@ AS $BODY$
     for sql_name in models_names:
         existing_names.append(sql_name['name'])
 
-    if not model_name in existing_names:
+    if model_name not in existing_names:
         return f"Model with name '{model_name} does not exist in the database!'"
 
     model_config = plpy.execute(f"select model_config from models_table where name = '{model_name}'")
@@ -337,7 +295,8 @@ AS $BODY$
     sample = plpy.execute(f"select x_test from test_table where id = {sample_id}")
     sample_list = []
     for line in sample:
-        sample_list.append(list(line.values()))
+        array_img = np.ndarray(shape=(28, 28), dtype=np.float64, buffer=line['x_test'])
+        sample_list.append(array_img)
     sample_list = np.squeeze(np.asarray(sample_list, dtype='float'))
     sample_list = sample_list.reshape(1, 28, 28)
     plpy.execute(f"select show_sample('test', {sample_id})")
@@ -371,7 +330,7 @@ AS $BODY$
     for sql_name in models_names:
         existing_names.append(sql_name['name'])
 
-    if not model_name in existing_names:
+    if model_name not in existing_names:
         return f"Model with name '{model_name} does not exist in the database!'"
 
     model_config = plpy.execute(f"select model_config from models_table where name = '{model_name}'")
@@ -410,6 +369,11 @@ AS $BODY$
     sample = sample.astype('float')
 
     predict_value = new_model.predict(sample)
+    count = 0
+    for shell in predict_value:
+        for value in shell:
+            plpy.notice(f'{count} - {100 * value.astype(float):.5f}%')
+            count += 1
     digit = np.argmax(predict_value)
     plpy.notice(f"digit = {digit}")
 
