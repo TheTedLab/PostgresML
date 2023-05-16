@@ -1,9 +1,34 @@
-import cv2
+import skimage
 import numpy as np
 import matplotlib.pyplot as plt
 from skimage.feature.texture import graycomatrix, graycoprops
 from utils import DirCategory
-from sklearn.preprocessing import normalize
+
+
+def calc_component_features(img_component):
+    img_component = np.true_divide(img_component, 32)
+    img_component = img_component.astype(int)
+    glcm = graycomatrix(img_component, [1], [0], levels=8, symmetric=False,
+                        normed=True)
+    haralick_features = {
+        'correlation': graycoprops(glcm, 'correlation')[0, 0],
+        'contrast': graycoprops(glcm, 'contrast')[0, 0],
+        'homogeneity': graycoprops(glcm, 'homogeneity')[0, 0],
+        'energy': graycoprops(glcm, 'energy')[0, 0]
+    }
+    return haralick_features
+
+
+def print_image(image):
+    row_count = 1
+    for img_row in image:
+        print(f'row: {row_count}')
+        col_count = 1
+        for img_col in img_row:
+            print(f'{col_count}: {img_col}')
+            col_count += 1
+        row_count += 1
+
 
 for dir_category in [
     DirCategory('test_dir', 11, 13),
@@ -11,128 +36,56 @@ for dir_category in [
     DirCategory('val_dir', 13, 16)
 ]:
     for img_dir in range(1, 9):
+        img_RED_global = []
+        img_GREEN_global = []
+        img_BLUE_global = []
         for img_name in range(dir_category.low, dir_category.high):
             img_path = f'resources/dataset/{dir_category.name}/{img_dir}/{img_name}.bmp'
-            img = plt.imread(img_path)
+            img_new = skimage.io.imread(img_path)
             print(img_path)
 
-            gray_img = np.average(img, axis=2).astype(np.uint8)
+            img_components = {}
 
-            img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-            R = img.copy()
-            G = img.copy()
-            B = img.copy()
-            RG = img.copy()
-            RB = img.copy()
-            GB = img.copy()
+            # RED component
+            img_red = img_new[:, :, 0]
+            img_RED_global = img_red
+            img_components['R'] = calc_component_features(img_red)
 
-            R[:, :, 1] = R[:, :, 2] = 0
-            G[:, :, 0] = G[:, :, 2] = 0
-            B[:, :, 0] = B[:, :, 1] = 0
-            RG[:, :, 2] = 0
-            RB[:, :, 1] = 0
-            GB[:, :, 0] = 0
+            # GREEN component
+            img_green = img_new[:, :, 2]
+            img_GREEN_global = img_green
+            img_components['G'] = calc_component_features(img_green)
 
-            fig = plt.figure(figsize=(18, 18))
-            rgbx = fig.add_subplot(241)
-            rx = fig.add_subplot(242)
-            gx = fig.add_subplot(243)
-            bx = fig.add_subplot(244)
-            grayx = fig.add_subplot(245)
-            rgx = fig.add_subplot(246)
-            rbx = fig.add_subplot(247)
-            gbx = fig.add_subplot(248)
+            # BLUE component
+            img_blue = img_new[:, :, 0]
+            img_BLUE_global = img_blue
+            img_components['B'] = calc_component_features(img_blue)
 
-            titles = ['Original', 'R component', 'G component', 'B component',
-                      'Gray', 'RG component', 'RB component', 'GB component']
-            axes = [rgbx, rx, gx, bx, grayx, rgx, rbx, gbx]
-            components = [img, R, G, B, gray_img, RG, RB, GB]
-            for x in axes:
-                axe_index = axes.index(x)
-                x.set_title(titles[axe_index])
-                if x == grayx:
-                    x.imshow(components[axe_index], cmap='Greys')
-                else:
-                    x.imshow(components[axe_index])
+            # RED-GREEN component
+            img_r_g = img_RED_global - img_GREEN_global
+            img_components['RG'] = calc_component_features(img_r_g)
 
+            # RED-BLUE component
+            img_r_b = img_RED_global - img_BLUE_global
+            img_components['RB'] = calc_component_features(img_r_b)
 
-            plt.show()
-
-
-            def calc_component_features(component):
-                component_gray_img = np.average(component, axis=2).astype(np.uint8)
-
-                # choose a positional operator
-                pos_op = [1, 0]
-
-                # init glcm array
-                glcm = np.zeros([256, 256])
-
-                # iterate over image and complete glcm
-                for i in range(component_gray_img.shape[0]):  # row
-                    for j in range(component_gray_img.shape[1]):  # col
-                        init_val = component_gray_img[i, j]
-                        try:
-                            target = component_gray_img[i + pos_op[0], j + pos_op[1]]
-                        except IndexError:
-                            continue  # out of img bounds
-                        glcm[init_val, target] += 1
-
-                glcm = glcm / np.sum(glcm)
-
-                glcm = np.reshape(glcm, (256, 256, 1, 1))
-                plt.imshow(np.log(glcm + 1e-6), cmap='Greys')
-                plt.show()
-
-                # plt.imshow(component_gray_img, cmap='Greys')
-                # plt.show()
-                # glcm = graycomatrix(component_gray_img, [1], [np.pi / 2], levels=256, normed=True)
-
-                haralick_features = {
-                    'contrast': graycoprops(glcm, 'contrast') / 100.0,
-                    'homogeneity': graycoprops(glcm, 'homogeneity'),
-                    'correlation': graycoprops(glcm, 'correlation'),
-                    'energy': graycoprops(glcm, 'energy')
-                }
-                # glcm = np.reshape(glcm, (256, 256, 1))
-                # print(glcm)
-                # plt.imshow(np.log(glcm + 1e-6), cmap='Greys')
-                # plt.show()
-                # plt.imshow(np.log(glcm + 1e-6))
-                # plt.show()
-                # print(haralick_features)
-                return haralick_features
-
-
-            components_features = {
-                'R component': dict(), 'G component': dict(), 'B component': dict(),
-                'RG component': dict(), 'RB component': dict(), 'GB component': dict()
-            }
-
-            calc_features = [R, G, B, RG, RB, GB]
-            calc_titles = titles[1:4] + titles[5:8]
-            for x in calc_titles:
-                component_index = calc_titles.index(x)
-                components_features[x] = calc_component_features(calc_features[component_index])
+            # GREEN-BLUE component
+            img_g_b = img_GREEN_global - img_BLUE_global
+            img_components['GB'] = calc_component_features(img_g_b)
 
             preprocessed_image = np.zeros([4, 6])
             comp_index = 0
-            for component in components_features.values():
-                # print(list(components_features.keys())[comp_index])
+            for component in img_components.values():
                 feature_index = 0
                 for key, val in component.items():
-                    # print(key, np.squeeze(val))
-                    preprocessed_image[feature_index][comp_index] = np.squeeze(val)
+                    preprocessed_image[feature_index][comp_index] = val
                     feature_index += 1
                 comp_index += 1
-
-            # preprocessed_image = normalize(preprocessed_image)
 
             fig = plt.figure(frameon=False)
             fig.set_size_inches(0.06, 0.04)
             ax = plt.Axes(fig, [0., 0., 1., 1.])
             ax.set_axis_off()
             fig.add_axes(ax)
-            ax.imshow(preprocessed_image, aspect='auto', cmap='gray')
+            ax.imshow(preprocessed_image, aspect='auto', cmap='Greys')
             plt.savefig(f'resources/preprocess-digitals/{dir_category.name}/{img_dir}/digital_image-{img_name}.png')
-            # plt.show()
