@@ -302,6 +302,11 @@ AS $BODY$
     plpy.execute(f"select show_sample('test', {sample_id})")
 
     predict_value = new_model.predict(sample_list)
+    count = 0
+    for shell in predict_value:
+        for value in shell:
+            plpy.notice(f'{count} - {100 * value.astype(float):.5f}%')
+            count += 1
     digit = np.argmax(predict_value)
     plpy.notice(f"digit = {digit}")
 
@@ -310,7 +315,7 @@ $BODY$;
 
 BEGIN;
 SELECT * FROM models_table;
-SELECT test_random_sample('dense-128-5');
+SELECT test_random_sample('conv2d-2');
 ROLLBACK;
 
 CREATE OR REPLACE FUNCTION test_handwritten_sample(model_name text)
@@ -380,4 +385,4 @@ AS $BODY$
     return 'All is OK!'
 $BODY$;
 
-SELECT test_handwritten_sample('dense-128-5');
+SELECT test_handwritten_sample('conv2d-2');
