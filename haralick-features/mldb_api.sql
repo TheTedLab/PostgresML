@@ -1,18 +1,5 @@
 CREATE EXTENSION plpython3u;
 
-DO LANGUAGE plpython3u $$
-import sys
-	plpy.notice('pl/python3 Path: {}'.format(sys.path))
-$$;
-
-DO $$
-import pkg_resources
-installed_packages = pkg_resources.working_set
-installed_packages_list = sorted(["%s==%s" % (i.key, i.version)
-   for i in installed_packages])
-plpy.notice(installed_packages_list)
-$$ LANGUAGE plpython3u;
-
 CREATE TABLE IF NOT EXISTS train_table
 (
     id serial primary key,
@@ -35,6 +22,35 @@ CREATE TABLE IF NOT EXISTS models_table
     model_config jsonb,
     model_weights jsonb
 );
+
+CREATE OR REPLACE FUNCTION python_path()
+RETURNS text
+LANGUAGE 'plpython3u'
+AS $BODY$
+    import sys
+    plpy.notice(f'pl/python3 Path: {sys.path[0]}')
+    for path in sys.path[1:]:
+        plpy.notice(path)
+    return sys.path
+$BODY$;
+
+SELECT python_path();
+
+CREATE OR REPLACE FUNCTION python_packages()
+RETURNS text
+LANGUAGE 'plpython3u'
+AS $BODY$
+    import pkg_resources
+    installed_packages = pkg_resources.working_set
+    installed_packages_list = sorted(
+        ["%s==%s" % (i.key, i.version) for i in installed_packages]
+    )
+    for package in installed_packages_list:
+        plpy.notice(package)
+    return installed_packages_list
+$BODY$;
+
+SELECT python_packages();
 
 CREATE OR REPLACE FUNCTION tf_version()
 RETURNS text
@@ -201,10 +217,9 @@ AS $BODY$
     return 'All is OK!'
 $BODY$;
 
-BEGIN;
+TRUNCATE TABLE models_table;
 SELECT * FROM models_table;
 SELECT define_and_save_model('conv2d-2');
-ROLLBACK;
 
 CREATE OR REPLACE FUNCTION load_and_test_model(model_name text)
     RETURNS text
@@ -263,10 +278,8 @@ AS $BODY$
     return 'All is OK!'
 $BODY$;
 
-BEGIN;
 SELECT * FROM models_table;
 SELECT load_and_test_model('conv2d-2');
-ROLLBACK;
 
 CREATE OR REPLACE FUNCTION test_random_sample(model_name text)
     RETURNS text
@@ -326,10 +339,8 @@ AS $BODY$
     return 'All is OK!'
 $BODY$;
 
-BEGIN;
 SELECT * FROM models_table;
 SELECT test_random_sample('conv2d-2');
-ROLLBACK;
 
 CREATE OR REPLACE FUNCTION test_handwritten_sample(model_name text)
     RETURNS text
@@ -398,4 +409,5 @@ AS $BODY$
     return 'All is OK!'
 $BODY$;
 
+SELECT * FROM models_table;
 SELECT test_handwritten_sample('conv2d-2');
