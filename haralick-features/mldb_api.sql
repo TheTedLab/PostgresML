@@ -1,5 +1,18 @@
 CREATE EXTENSION plpython3u;
 
+DO LANGUAGE plpython3u $$
+import sys
+	plpy.notice('pl/python3 Path: {}'.format(sys.path))
+$$;
+
+DO $$
+import pkg_resources
+installed_packages = pkg_resources.working_set
+installed_packages_list = sorted(["%s==%s" % (i.key, i.version)
+   for i in installed_packages])
+plpy.notice(installed_packages_list)
+$$ LANGUAGE plpython3u;
+
 CREATE TABLE IF NOT EXISTS train_table
 (
     id serial primary key,
@@ -252,7 +265,7 @@ $BODY$;
 
 BEGIN;
 SELECT * FROM models_table;
-SELECT load_and_test_model('dense-128-5');
+SELECT load_and_test_model('conv2d-2');
 ROLLBACK;
 
 CREATE OR REPLACE FUNCTION test_random_sample(model_name text)
@@ -356,7 +369,7 @@ AS $BODY$
                   loss='sparse_categorical_crossentropy',
                   metrics=['accuracy'])
 
-    img = load_img('C:\\generatedfiles\\sample_image.png', grayscale=True, target_size=(28, 28))
+    img = load_img('D:\\generatedfiles\\sample_image.png', grayscale=True, target_size=(28, 28))
     img = ImageChops.invert(img)
     sample = img_to_array(img)
     sample = sample / 255
