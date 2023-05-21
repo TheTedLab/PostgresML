@@ -94,16 +94,38 @@ $BODY$;
 
 SELECT tf_version();
 
-CREATE OR REPLACE FUNCTION load_dataset(dataset_name text, is_val_table boolean)
+CREATE OR REPLACE FUNCTION lib_versions_test()
+RETURNS text
+LANGUAGE 'plpython3u'
+AS $BODY$
+    import numpy
+    import skimage
+    import scipy
+    import tifffile
+
+    versions = {
+        'numpy': numpy.__version__,
+        'skimage': skimage.__version__,
+        'scipy': scipy.__version__,
+        'tifffile': tifffile.__version__
+    }
+    plpy.notice(f"numpy=={versions['numpy']}")
+    plpy.notice(f"scikit-image=={versions['skimage']}")
+    plpy.notice(f"scipy=={versions['scipy']}")
+    plpy.notice(f"tifffile=={versions['tifffile']}")
+
+    return versions
+$BODY$;
+
+SELECT lib_versions_test();
+
+CREATE OR REPLACE FUNCTION load_dataset(
+    dataset_path text,
+    dataset_name text,
+    is_val_table boolean)
     RETURNS text
     LANGUAGE 'plpython3u'
 AS $BODY$
-    import tensorflow as tf
-
-    (x_train, y_train), (x_test, y_test) = tf.keras.datasets.mnist.load_data()
-    x_train = x_train / 255
-    x_test = x_test / 255
-
     # check dataset_name not in database
     dataset_ids = plpy.execute(f"select dataset_id from datasets where dataset_name = '{dataset_name}'")
 
@@ -118,32 +140,72 @@ AS $BODY$
     # get new dataset_id
     dataset_id = plpy.execute(f"select dataset_id from datasets where dataset_name = '{dataset_name}'")[0]['dataset_id']
 
+    import os
+    import skimage
+    import pickle
+
+    x_train, y_train = [], []
+    train_dir = os.path.join(dataset_path, 'train_dir')
+    for class_id in [name for name in os.listdir(train_dir)]:
+        class_dir = os.path.join(train_dir, class_id)
+        plpy.notice(class_dir)
+        for sample in os.listdir(class_dir):
+            sample_dir = os.path.join(class_dir, sample)
+            image = skimage.io.imread(sample_dir)
+            x_train.append(image)
+            y_train.append(class_id)
+
     for i in range(len(x_train)):
         plan = plpy.prepare("insert into train_table(dataset_id, x_train, y_train) values ($1, $2, $3)", ["int", "bytea", "int"])
-        plpy.execute(plan, [dataset_id, x_train[i].tobytes(), y_train[i]])
-        if i % (int(len(x_train) / 100)) == 0:
+        plpy.execute(plan, [dataset_id, pickle.dumps(x_train[i]), y_train[i]])
+        if len(x_train) > 100 and i % (int(len(x_train) / 100)) == 0:
             plpy.notice(f"loaded {i / (int(len(x_train) / 100))}% train data")
+        elif len(x_train) < 100:
+            plpy.notice(f"loaded {i / (len(x_train) / 100)}% train data")
     plpy.notice('---TRAIN-DATA-LOADED---')
+
+    x_test, y_test = [], []
+    test_dir = os.path.join(dataset_path, 'test_dir')
+    for class_id in [name for name in os.listdir(test_dir)]:
+        class_dir = os.path.join(test_dir, class_id)
+        plpy.notice(class_dir)
+        for sample in os.listdir(class_dir):
+            sample_dir = os.path.join(class_dir, sample)
+            image = skimage.io.imread(sample_dir)
+            x_test.append(image)
+            y_test.append(class_id)
 
     for i in range(len(x_test)):
         plan = plpy.prepare("insert into test_table(dataset_id, x_test, y_test) values ($1, $2, $3)", ["int", "bytea", "int"])
-        plpy.execute(plan, [dataset_id, x_test[i].tobytes(), y_test[i]])
-        if i % (int(len(x_test) / 100)) == 0:
+        plpy.execute(plan, [dataset_id, pickle.dumps(x_test[i]), y_test[i]])
+        if len(x_test) > 100 and i % (int(len(x_test) / 100)) == 0:
             plpy.notice(f"loaded {i / (int(len(x_test) / 100))}% test data")
+        elif len(x_test) < 100:
+            plpy.notice(f"loaded {i / (len(x_test) / 100)}% test data")
     plpy.notice('---TEST-DATA-LOADED---')
 
     if is_val_table:
         plpy.notice(f'val_table is enabled!')
 
         # select validation data
-        x_val = x_test
-        y_val = y_test
+        x_val, y_val = [], []
+        val_dir = os.path.join(dataset_path, 'val_dir')
+        for class_id in [name for name in os.listdir(val_dir)]:
+            class_dir = os.path.join(val_dir, class_id)
+            plpy.notice(class_dir)
+            for sample in os.listdir(class_dir):
+                sample_dir = os.path.join(class_dir, sample)
+                image = skimage.io.imread(sample_dir)
+                x_val.append(image)
+                y_val.append(class_id)
 
         for i in range(len(x_val)):
             plan = plpy.prepare("insert into val_table(dataset_id, x_val, y_val) values ($1, $2, $3)", ["int", "bytea", "int"])
-            plpy.execute(plan, [dataset_id, x_val[i].tobytes(), y_val[i]])
-            if i % (int(len(x_val) / 100)) == 0:
+            plpy.execute(plan, [dataset_id, pickle.dumps(x_val[i]), y_val[i]])
+            if len(x_val) > 100 and i % (int(len(x_val) / 100)) == 0:
                 plpy.notice(f"loaded {i / (int(len(x_val) / 100))}% val data")
+            elif len(x_val) < 100:
+                plpy.notice(f"loaded {i / (len(x_val) / 100)}% val data")
         plpy.notice('---VAL-DATA-LOADED---')
 
     return f"Successful dataset {dataset_name} load!"
@@ -154,11 +216,11 @@ SELECT * FROM train_table ORDER BY sample_id;
 SELECT * FROM test_table ORDER BY sample_id;
 SELECT * FROM val_table ORDER BY sample_id;
 
-TRUNCATE TABLE datasets CASCADE;
-TRUNCATE TABLE train_table;
-TRUNCATE TABLE test_table;
-
-SELECT load_dataset('mnist-3', false);
+SELECT load_dataset(
+    'D:\\haralick-dataset',
+    'haralick',
+    true
+);
 
 SELECT sample_id, dataset_name, x_train, y_train FROM train_table
 JOIN datasets d on train_table.dataset_id = d.dataset_id
@@ -172,12 +234,120 @@ SELECT sample_id, dataset_name, x_val, y_val FROM val_table
 JOIN datasets d on val_table.dataset_id = d.dataset_id
 ORDER BY sample_id;
 
+CREATE OR REPLACE FUNCTION load_mnist(
+    dataset_name text,
+    is_val_table boolean)
+    RETURNS text
+    LANGUAGE 'plpython3u'
+AS $BODY$
+    # check dataset_name not in database
+    dataset_ids = plpy.execute(f"select dataset_id from datasets where dataset_name = '{dataset_name}'")
+
+    if dataset_ids.nrows() > 0:
+        plpy.info(f"Dataset {dataset_name} already exists in database!")
+        return f"Dataset {dataset_name} already exists in database!"
+
+    # insert new dataset name
+    plan = plpy.prepare("insert into datasets(dataset_name) values ($1)", ["text"])
+    plpy.execute(plan, [dataset_name])
+
+    # get new dataset_id
+    dataset_id = plpy.execute(f"select dataset_id from datasets where dataset_name = '{dataset_name}'")[0]['dataset_id']
+
+    import tensorflow as tf
+    import pickle
+
+    (x_train, y_train), (x_test, y_test) = tf.keras.datasets.mnist.load_data()
+    x_train = x_train / 255
+    x_test = x_test / 255
+
+    for i in range(len(x_train)):
+        plan = plpy.prepare("insert into train_table(dataset_id, x_train, y_train) values ($1, $2, $3)", ["int", "bytea", "int"])
+        plpy.execute(plan, [dataset_id, pickle.dumps(x_train[i]), y_train[i]])
+        if i % (int(len(x_train) / 100)) == 0:
+            plpy.notice(f"loaded {i / (int(len(x_train) / 100))}% train data")
+    plpy.notice('---TRAIN-DATA-LOADED---')
+
+    for i in range(len(x_test)):
+        plan = plpy.prepare("insert into test_table(dataset_id, x_test, y_test) values ($1, $2, $3)", ["int", "bytea", "int"])
+        plpy.execute(plan, [dataset_id, pickle.dumps(x_test[i]), y_test[i]])
+        if i % (int(len(x_test) / 100)) == 0:
+            plpy.notice(f"loaded {i / (int(len(x_test) / 100))}% test data")
+    plpy.notice('---TEST-DATA-LOADED---')
+
+    if is_val_table:
+        plpy.notice(f'val_table is enabled!')
+
+        # select validation data
+        x_val = x_test
+        y_val = y_test
+
+        for i in range(len(x_val)):
+            plan = plpy.prepare("insert into val_table(dataset_id, x_val, y_val) values ($1, $2, $3)", ["int", "bytea", "int"])
+            plpy.execute(plan, [dataset_id, pickle.dumps(x_val[i]), y_val[i]])
+            if i % (int(len(x_val) / 100)) == 0:
+                plpy.notice(f"loaded {i / (int(len(x_val) / 100))}% val data")
+        plpy.notice('---VAL-DATA-LOADED---')
+
+    return f"Successful dataset {dataset_name} load!"
+$BODY$;
+
+SELECT * from datasets ORDER BY dataset_id;
+SELECT * FROM train_table ORDER BY sample_id;
+SELECT * FROM test_table ORDER BY sample_id;
+SELECT * FROM val_table ORDER BY sample_id;
+
+SELECT load_mnist('mnist', false);
+
 CREATE OR REPLACE FUNCTION show_sample(
     sample_table text,
     sample_id integer)
     RETURNS text
     LANGUAGE 'plpython3u'
 AS $BODY$
+    import pickle
+    import numpy as np
+    import matplotlib.pyplot as plt
+
+    if sample_table in ["train", "test", "val"]:
+        sample = plpy.execute(f"select x_{sample_table} from {sample_table}_table where sample_id = {sample_id}")
+
+        if sample.nrows() == 0:
+            plpy.info(f"Index {sample_id} out of data table \"{sample_table}\".")
+            return f"Index {sample_id} out of data table \"{sample_table}\"."
+
+        bytes_img = sample[0][f'x_{sample_table}']
+        array_img = pickle.loads(bytes_img)
+
+        plt.imshow(array_img)
+        plt.savefig(f'D:\\saved-images\\sample-{sample_table}-{sample_id}.png')
+
+        # get dataset name
+        dataset_name = plpy.execute(
+            f'select dataset_name from {sample_table}_table '
+            f'join datasets d on {sample_table}_table.dataset_id = d.dataset_id '
+            f'where sample_id = {sample_id}'
+        )[0]['dataset_name']
+
+        plpy.info(f"sample_id: {sample_id} dataset_name: {dataset_name}")
+    else:
+        plpy.info(f"Data table \"{sample_table}\" does not exist!")
+        return f"Data table \"{sample_table}\" does not exist!"
+    return "Successful sample show!"
+$BODY$;
+
+SELECT show_sample('train', 1);
+SELECT show_sample('test', 1);
+SELECT show_sample('train', 100);
+SELECT show_sample('val', 10);
+
+CREATE OR REPLACE FUNCTION show_mnist(
+    sample_table text,
+    sample_id integer)
+    RETURNS text
+    LANGUAGE 'plpython3u'
+AS $BODY$
+    import pickle
     import numpy as np
 
     if sample_table in ["train", "test", "val"]:
@@ -188,7 +358,7 @@ AS $BODY$
             return f"Index {sample_id} out of data table \"{sample_table}\"."
 
         bytes_img = sample[0][f'x_{sample_table}']
-        array_img = np.ndarray(shape=(28, 28), dtype=np.float64, buffer=bytes_img)
+        array_img = pickle.loads(bytes_img)
 
         for line in array_img:
             line_str = ''
@@ -213,10 +383,8 @@ AS $BODY$
     return "Successful sample show!"
 $BODY$;
 
-SELECT show_sample('train', 1);
-SELECT show_sample('test', 1);
-SELECT show_sample('train', 60001);
-SELECT show_sample('val', 9000);
+SELECT show_mnist('train', 100);
+SELECT show_mnist('test', 100);
 
 CREATE OR REPLACE FUNCTION define_and_save_model(model_name text)
     RETURNS text
