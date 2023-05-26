@@ -222,6 +222,8 @@ SELECT load_dataset(
     true
 );
 
+SELECT * from datasets ORDER BY dataset_id;
+
 SELECT sample_id, dataset_name, x_train, y_train FROM train_table
 JOIN datasets d on train_table.dataset_id = d.dataset_id
 ORDER BY sample_id;
@@ -293,9 +295,18 @@ AS $BODY$
 $BODY$;
 
 SELECT * from datasets ORDER BY dataset_id;
-SELECT * FROM train_table ORDER BY sample_id;
-SELECT * FROM test_table ORDER BY sample_id;
-SELECT * FROM val_table ORDER BY sample_id;
+
+SELECT sample_id, dataset_name, x_train, y_train FROM train_table
+JOIN datasets d on train_table.dataset_id = d.dataset_id
+ORDER BY sample_id;
+
+SELECT sample_id, dataset_name, x_test, y_test FROM test_table
+JOIN datasets d on test_table.dataset_id = d.dataset_id
+ORDER BY sample_id;
+
+SELECT sample_id, dataset_name, x_val, y_val FROM val_table
+JOIN datasets d on val_table.dataset_id = d.dataset_id
+ORDER BY sample_id;
 
 SELECT load_mnist('mnist', false);
 
@@ -333,7 +344,7 @@ AS $BODY$
     else:
         plpy.info(f"Data table \"{sample_table}\" does not exist!")
         return f"Data table \"{sample_table}\" does not exist!"
-    return "Successful sample show!"
+    return f"Successful show! sample_id = {sample_id}, dataset: {dataset_name}"
 $BODY$;
 
 SELECT show_sample('train', 1);
@@ -380,11 +391,157 @@ AS $BODY$
     else:
         plpy.info(f"Data table \"{sample_table}\" does not exist!")
         return f"Data table \"{sample_table}\" does not exist!"
-    return "Successful sample show!"
+    return f"Successful show! sample_id = {sample_id}, dataset: {dataset_name}"
 $BODY$;
 
 SELECT show_mnist('train', 100);
 SELECT show_mnist('test', 100);
+
+CREATE OR REPLACE FUNCTION glcm_digitization(
+    dataset_name text,
+    is_val_table boolean)
+    RETURNS text
+    LANGUAGE 'plpython3u'
+AS $BODY$
+    import pickle
+    import skimage
+    import numpy as np
+    import matplotlib.pyplot as plt
+    from skimage.feature.texture import graycomatrix, graycoprops
+
+    def calc_component_features(img_component):
+        img_component = np.true_divide(img_component, 32)
+        img_component = img_component.astype(int)
+        glcm = graycomatrix(img_component, [1], [0], levels=8, symmetric=False,
+                            normed=True)
+        haralick_features = {
+            'correlation': graycoprops(glcm, 'correlation')[0, 0],
+            'contrast': graycoprops(glcm, 'contrast')[0, 0],
+            'homogeneity': graycoprops(glcm, 'homogeneity')[0, 0],
+            'energy': graycoprops(glcm, 'energy')[0, 0]
+        }
+        return haralick_features
+
+    # check dataset_name-digital not in database
+    dataset_ids = plpy.execute(f"select dataset_id from datasets where dataset_name = '{dataset_name}-digital'")
+
+    if dataset_ids.nrows() > 0:
+        plpy.info(
+            f'Dataset {dataset_name}-digital already exists in database. '
+            f'You have either already digitized or created a dataset with a reserved name.'
+        )
+        return f'Dataset {dataset_name}-digital already exists in database. ' \
+               f'You have either already digitized or created a dataset with a reserved name.'
+
+    # insert new dataset name
+    plan = plpy.prepare("insert into datasets(dataset_name) values ($1)", ["text"])
+    plpy.execute(plan, [f'{dataset_name}-digital'])
+
+    # get new dataset_id
+    dataset_id = plpy.execute(f"select dataset_id from datasets where dataset_name = '{dataset_name}-digital'")[0]['dataset_id']
+
+    tables_list = ['train', 'test']
+    if is_val_table:
+        tables_list.append('val')
+    for table_name in tables_list:
+        samples = plpy.execute(
+            f'select dataset_name, x_{table_name}, y_{table_name} from {table_name}_table '
+            f'join datasets d on {table_name}_table.dataset_id = d.dataset_id '
+            f'where dataset_name = \'{dataset_name}\''
+        )
+
+        if samples.nrows() == 0:
+            plpy.info(f'No samples in {table_name}_table for dataset with name \"{dataset_name}\".')
+            return f'No samples in {table_name}_table for dataset with name \"{dataset_name}\".'
+
+        img_RED_global = []
+        img_GREEN_global = []
+        img_BLUE_global = []
+        for sample in samples:
+            bytes_img = sample[f'x_{table_name}']
+            array_img = pickle.loads(bytes_img)
+
+            img_components = {}
+
+            # RED component
+            img_red = array_img[:, :, 0]
+            img_RED_global = img_red
+            img_components['R'] = calc_component_features(img_red)
+
+            # GREEN component
+            img_green = array_img[:, :, 2]
+            img_GREEN_global = img_green
+            img_components['G'] = calc_component_features(img_green)
+
+            # BLUE component
+            img_blue = array_img[:, :, 0]
+            img_BLUE_global = img_blue
+            img_components['B'] = calc_component_features(img_blue)
+
+            # RED-GREEN component
+            img_r_g = img_RED_global - img_GREEN_global
+            img_components['RG'] = calc_component_features(img_r_g)
+
+            # RED-BLUE component
+            img_r_b = img_RED_global - img_BLUE_global
+            img_components['RB'] = calc_component_features(img_r_b)
+
+            # GREEN-BLUE component
+            img_g_b = img_GREEN_global - img_BLUE_global
+            img_components['GB'] = calc_component_features(img_g_b)
+
+            # construct an image
+            preprocessed_image = np.zeros([4, 6])
+            comp_index = 0
+            for component in img_components.values():
+                feature_index = 0
+                for key, val in component.items():
+                    preprocessed_image[feature_index][comp_index] = val
+                    feature_index += 1
+                comp_index += 1
+
+            # save image
+            fig = plt.figure(frameon=False)
+            fig.set_size_inches(0.06, 0.04)
+            ax = plt.Axes(fig, [0., 0., 1., 1.])
+            ax.set_axis_off()
+            fig.add_axes(ax)
+            ax.imshow(preprocessed_image, aspect='auto', cmap='Greys')
+            image_path = 'D:\\saved-images\\digital_image.png'
+            plt.savefig(image_path)
+            plt.close(fig)
+
+            # load digital image to database
+            digital_image = skimage.io.imread(image_path)
+            y_lable = sample[f'y_{table_name}']
+
+            if table_name == 'train':
+                plan = plpy.prepare("insert into train_table(dataset_id, x_train, y_train) values ($1, $2, $3)", ["int", "bytea", "int"])
+                plpy.execute(plan, [dataset_id, pickle.dumps(digital_image), y_lable])
+            elif table_name == 'test':
+                plan = plpy.prepare("insert into test_table(dataset_id, x_test, y_test) values ($1, $2, $3)", ["int", "bytea", "int"])
+                plpy.execute(plan, [dataset_id, pickle.dumps(digital_image), y_lable])
+            elif table_name == 'val':
+                plan = plpy.prepare("insert into val_table(dataset_id, x_val, y_val) values ($1, $2, $3)", ["int", "bytea", "int"])
+                plpy.execute(plan, [dataset_id, pickle.dumps(digital_image), y_lable])
+    return "Successful glcm digitization!"
+$BODY$;
+
+SELECT glcm_digitization('haralick', true);
+
+SELECT * from datasets ORDER BY dataset_id;
+
+SELECT sample_id, dataset_name, x_train, y_train FROM train_table
+JOIN datasets d on train_table.dataset_id = d.dataset_id
+ORDER BY sample_id;
+
+SELECT sample_id, dataset_name, x_test, y_test FROM test_table
+JOIN datasets d on test_table.dataset_id = d.dataset_id
+ORDER BY sample_id;
+
+SELECT sample_id, dataset_name, x_val, y_val FROM val_table
+JOIN datasets d on val_table.dataset_id = d.dataset_id
+ORDER BY sample_id;
 
 CREATE OR REPLACE FUNCTION define_and_save_model(model_name text)
     RETURNS text
