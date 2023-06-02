@@ -349,8 +349,8 @@ $BODY$;
 
 SELECT show_sample('train', 1);
 SELECT show_sample('test', 1);
+SELECT show_sample('val', 1);
 SELECT show_sample('train', 100);
-SELECT show_sample('val', 10);
 
 CREATE OR REPLACE FUNCTION show_mnist(
     sample_table text,
@@ -542,6 +542,202 @@ ORDER BY sample_id;
 SELECT sample_id, dataset_name, x_val, y_val FROM val_table
 JOIN datasets d on val_table.dataset_id = d.dataset_id
 ORDER BY sample_id;
+
+-- TO DO: delete dataset_name from datasets if no digital dataset exists during noise generation
+-- TO DO: add class amount recognition (fix for class_id in range(1, 9))
+CREATE OR REPLACE FUNCTION noise_generation(
+    dataset_name text,
+    is_val_table boolean,
+    standard_deviation double precision,
+    noise_amount int)
+    RETURNS text
+    LANGUAGE 'plpython3u'
+AS $BODY$
+    import pickle
+    import random
+    import skimage
+    import numpy as np
+    import matplotlib.pyplot as plt
+
+    def make_noise_and_insert(image, noise_range, diff, dataset_id, table_name, y_lable):
+        for noises in range(noise_range):
+            for i in range(len(image)):
+                for j in range(len(image[i])):
+                    image[i][j] += random.uniform(-standard_deviation, standard_deviation)
+
+            # save image
+            fig = plt.figure(frameon=False)
+            fig.set_size_inches(0.06, 0.04)
+            ax = plt.Axes(fig, [0., 0., 1., 1.])
+            ax.set_axis_off()
+            fig.add_axes(ax)
+            ax.imshow(image, aspect='auto', cmap='gray')
+            image_path = f'D:\\saved-images\\noise_image.png'
+            plt.savefig(image_path)
+            plt.close(fig)
+
+            # load noise image to database
+            noise_image = skimage.io.imread(image_path)
+
+            if table_name == 'train':
+                plan = plpy.prepare("insert into train_table(dataset_id, x_train, y_train) values ($1, $2, $3)", ["int", "bytea", "int"])
+                plpy.execute(plan, [dataset_id, pickle.dumps(noise_image), y_lable])
+            elif table_name == 'test':
+                plan = plpy.prepare("insert into test_table(dataset_id, x_test, y_test) values ($1, $2, $3)", ["int", "bytea", "int"])
+                plpy.execute(plan, [dataset_id, pickle.dumps(noise_image), y_lable])
+            elif table_name == 'val':
+                plan = plpy.prepare("insert into val_table(dataset_id, x_val, y_val) values ($1, $2, $3)", ["int", "bytea", "int"])
+                plpy.execute(plan, [dataset_id, pickle.dumps(noise_image), y_lable])
+
+
+    # check dataset_name-noised not in database
+    dataset_ids = plpy.execute(f"select dataset_id from datasets where dataset_name = '{dataset_name}-noised'")
+
+    if dataset_ids.nrows() > 0:
+        plpy.info(
+            f'Dataset {dataset_name}-noised already exists in database. '
+            f'You have either already generated noise or created a dataset with a reserved name.'
+        )
+        return f'Dataset {dataset_name}-noise already exists in database. ' \
+               f'You have either already generated noise or created a dataset with a reserved name.'
+
+    # insert new dataset name
+    plan = plpy.prepare("insert into datasets(dataset_name) values ($1)", ["text"])
+    plpy.execute(plan, [f'{dataset_name}-noised'])
+
+    # get new dataset_id
+    dataset_id = plpy.execute(f"select dataset_id from datasets where dataset_name = '{dataset_name}-noised'")[0]['dataset_id']
+
+    for class_id in range(1, 9):
+        class_samples = []
+        samples_train = plpy.execute(
+            f'select dataset_name, x_train, y_train from train_table '
+            f'join datasets d on train_table.dataset_id = d.dataset_id '
+            f'where dataset_name = \'{dataset_name}-digital\' and y_train = {class_id}'
+        )
+
+        if samples_train.nrows() == 0:
+            plpy.info(f'No samples in train_table for dataset with name \"{dataset_name}-digital\".')
+            return f'No samples in train_table for dataset with name \"{dataset_name}-digital\".'
+
+        class_samples += samples_train
+
+        samples_test = plpy.execute(
+            f'select dataset_name, x_test, y_test from test_table '
+            f'join datasets d on test_table.dataset_id = d.dataset_id '
+            f'where dataset_name = \'{dataset_name}-digital\' and y_test = {class_id}'
+        )
+
+        if samples_test.nrows() == 0:
+            plpy.info(f'No samples in test_table for dataset with name \"{dataset_name}-digital\".')
+            return f'No samples in test_table for dataset with name \"{dataset_name}-digital\".'
+
+        class_samples += samples_test
+
+        if is_val_table:
+            samples_val = plpy.execute(
+                f'select dataset_name, x_val, y_val from val_table '
+                f'join datasets d on val_table.dataset_id = d.dataset_id '
+                f'where dataset_name = \'{dataset_name}-digital\' and y_val = {class_id}'
+            )
+
+            if samples_val.nrows() == 0:
+                plpy.info(f'No samples in val_table for dataset with name \"{dataset_name}-digital\".')
+                return f'No samples in val_table for dataset with name \"{dataset_name}-digital\".'
+
+            class_samples += samples_val
+
+        total_class_img = [[0., 0., 0., 0., 0., 0.] for _ in range(4)]
+        for sample in class_samples:
+            bytes_img = None
+            table_name = ''
+            if sample.get('x_train') is not None:
+                bytes_img = sample.get('x_train')
+                table_name = 'x_train'
+            elif sample.get('x_test') is not None:
+                bytes_img = sample.get('x_test')
+                table_name = 'x_test'
+            elif sample.get('x_val') is not None:
+                bytes_img = sample.get('x_val')
+                table_name = 'x_val'
+            array_img = pickle.loads(bytes_img)
+
+            # save for skimage conversion
+            fig = plt.figure(frameon=False)
+            fig.set_size_inches(0.06, 0.04)
+            ax = plt.Axes(fig, [0., 0., 1., 1.])
+            ax.set_axis_off()
+            fig.add_axes(ax)
+            ax.imshow(array_img, aspect='auto', cmap='Greys')
+            image_path = f'D:\\saved-images\\grayscale_image.png'
+            plt.savefig(image_path)
+            plt.close(fig)
+
+            # conversion to grayscale
+            grayscale_image = skimage.io.imread(image_path, as_gray=True)
+
+            # get average digital image
+            for i in range(len(grayscale_image)):
+                for j in range(len(grayscale_image[0])):
+                    total_class_img[i][j] += grayscale_image[i][j]
+
+        average_img = np.true_divide(total_class_img, 15)
+
+        make_noise_and_insert(
+            average_img,
+            len(samples_train) * noise_amount,
+            0,
+            dataset_id,
+            'train',
+            class_id
+        )
+        make_noise_and_insert(
+            average_img,
+            len(samples_test) * noise_amount,
+            len(samples_train) * noise_amount,
+            dataset_id,
+            'test',
+            class_id
+        )
+        if is_val_table:
+            make_noise_and_insert(
+                average_img,
+                len(samples_val) * noise_amount,
+                len(samples_train) * noise_amount + len(samples_test) * noise_amount,
+                dataset_id,
+                'val',
+                class_id
+            )
+    return "Successful noise generation!"
+$BODY$;
+
+SELECT noise_generation(
+    'haralick',
+    true,
+    0.032,
+    10
+);
+
+SELECT * from datasets ORDER BY dataset_id;
+
+SELECT sample_id, dataset_name, x_train, y_train FROM train_table
+JOIN datasets d on train_table.dataset_id = d.dataset_id
+WHERE dataset_name = 'haralick-noised'
+ORDER BY sample_id;
+
+SELECT sample_id, dataset_name, x_test, y_test FROM test_table
+JOIN datasets d on test_table.dataset_id = d.dataset_id
+WHERE dataset_name = 'haralick-noised'
+ORDER BY sample_id;
+
+SELECT sample_id, dataset_name, x_val, y_val FROM val_table
+JOIN datasets d on val_table.dataset_id = d.dataset_id
+WHERE dataset_name = 'haralick-noised'
+ORDER BY sample_id;
+
+SELECT show_sample('train', 161);
+SELECT show_sample('test', 33);
+SELECT show_sample('val', 49);
 
 CREATE OR REPLACE FUNCTION define_and_save_model(model_name text)
     RETURNS text
