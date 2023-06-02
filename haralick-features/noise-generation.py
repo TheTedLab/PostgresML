@@ -7,18 +7,18 @@ from utils import DirCategory
 standard_deviation = 0.032
 
 
-def make_noise(average_img, noise_range, diff, dir_name):
+def make_noise(image, noise_range, diff, dir_name):
     for noises in range(noise_range):
-        for i in range(len(average_img)):
-            for j in range(len(average_img[i])):
-                average_img[i][j] += random.uniform(-standard_deviation, standard_deviation)
+        for i in range(len(image)):
+            for j in range(len(image[i])):
+                image[i][j] += random.uniform(-standard_deviation, standard_deviation)
 
         fig = plt.figure(frameon=False)
         fig.set_size_inches(0.06, 0.04)
         ax = plt.Axes(fig, [0., 0., 1., 1.])
         ax.set_axis_off()
         fig.add_axes(ax)
-        ax.imshow(average_img, aspect='auto', cmap='gray')
+        ax.imshow(image, aspect='auto', cmap='gray')
         img_number = noises + diff + 1
         plt.savefig(f'resources/final-digitals/{dir_name}/{img_dir}/{img_number}.png')
 
@@ -35,13 +35,9 @@ for img_dir in range(1, 9):
             img = skimage.io.imread(img_path, as_gray=True)
             print(img_path)
 
-            row_count = 0
-            for img_row in img:
-                col_count = 0
-                for img_col in img_row:
-                    total_img[row_count][col_count] += img_col
-                    col_count += 1
-                row_count += 1
+            for i in range(len(img)):
+                for j in range(len(img[0])):
+                    total_img[i][j] += img[i][j]
 
     average_img = np.true_divide(total_img, 15)
 
