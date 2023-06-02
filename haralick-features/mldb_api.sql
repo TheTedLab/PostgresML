@@ -543,8 +543,6 @@ SELECT sample_id, dataset_name, x_val, y_val FROM val_table
 JOIN datasets d on val_table.dataset_id = d.dataset_id
 ORDER BY sample_id;
 
--- TO DO: delete dataset_name from datasets if no digital dataset exists during noise generation
--- TO DO: add class amount recognition (fix for class_id in range(1, 9))
 CREATE OR REPLACE FUNCTION noise_generation(
     dataset_name text,
     is_val_table boolean,
@@ -590,6 +588,18 @@ AS $BODY$
                 plpy.execute(plan, [dataset_id, pickle.dumps(noise_image), y_lable])
 
 
+    def delete_dataset(dataset_id):
+        plpy.execute(f'delete from datasets where dataset_id = {dataset_id}')
+
+    # check dataset_name-digital exists in database
+    digital_dataset = plpy.execute(f'select dataset_id from datasets where dataset_name = \'{dataset_name}-digital\'')
+
+    if digital_dataset.nrows() == 0:
+        plpy.info(
+            f'Dataset {dataset_name}-digital does not exist in the database.'
+        )
+        return f'Dataset {dataset_name}-digital does not exist in the database.'
+
     # check dataset_name-noised not in database
     dataset_ids = plpy.execute(f"select dataset_id from datasets where dataset_name = '{dataset_name}-noised'")
 
@@ -608,7 +618,33 @@ AS $BODY$
     # get new dataset_id
     dataset_id = plpy.execute(f"select dataset_id from datasets where dataset_name = '{dataset_name}-noised'")[0]['dataset_id']
 
-    for class_id in range(1, 9):
+    # check that train_table is not empty
+    check_samples = plpy.execute(
+        f'select y_train from train_table '
+        f'join datasets d on train_table.dataset_id = d.dataset_id '
+        f'where dataset_name = \'{dataset_name}-digital\''
+    )
+
+    if check_samples.nrows() == 0:
+        plpy.info(
+            f'Dataset {dataset_name}-digital does not contain samples in train_table.'
+        )
+        delete_dataset(dataset_id)
+        return f'Dataset {dataset_name}-digital does not contain samples in train_table.'
+
+    # get min and max classes labels
+    min_class = plpy.execute(
+        f'select min(y_train) from train_table '
+        f'join datasets d on train_table.dataset_id = d.dataset_id '
+        f'where dataset_name = \'{dataset_name}-digital\''
+    )[0]['min']
+    max_class = plpy.execute(
+        f'select max(y_train) from train_table '
+        f'join datasets d on train_table.dataset_id = d.dataset_id '
+        f'where dataset_name = \'{dataset_name}-digital\''
+    )[0]['max']
+
+    for class_id in range(min_class, max_class + 1):
         class_samples = []
         samples_train = plpy.execute(
             f'select dataset_name, x_train, y_train from train_table '
@@ -618,6 +654,7 @@ AS $BODY$
 
         if samples_train.nrows() == 0:
             plpy.info(f'No samples in train_table for dataset with name \"{dataset_name}-digital\".')
+            delete_dataset(dataset_id)
             return f'No samples in train_table for dataset with name \"{dataset_name}-digital\".'
 
         class_samples += samples_train
@@ -630,6 +667,7 @@ AS $BODY$
 
         if samples_test.nrows() == 0:
             plpy.info(f'No samples in test_table for dataset with name \"{dataset_name}-digital\".')
+            delete_dataset(dataset_id)
             return f'No samples in test_table for dataset with name \"{dataset_name}-digital\".'
 
         class_samples += samples_test
@@ -643,6 +681,7 @@ AS $BODY$
 
             if samples_val.nrows() == 0:
                 plpy.info(f'No samples in val_table for dataset with name \"{dataset_name}-digital\".')
+                delete_dataset(dataset_id)
                 return f'No samples in val_table for dataset with name \"{dataset_name}-digital\".'
 
             class_samples += samples_val
