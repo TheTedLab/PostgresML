@@ -1,6 +1,8 @@
 import os
-import matplotlib.pyplot as plt
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+import numpy as np
+import skimage
+import matplotlib.pyplot as plt
 from keras.preprocessing.image import ImageDataGenerator
 from tensorflow.python.keras.models import Sequential
 from tensorflow.python.keras.layers import Conv2D, MaxPooling2D
@@ -19,13 +21,69 @@ input_shape = (img_width, img_height, 3)
 # Количество эпох
 epochs = 200
 # Размер мини-выборки
-batch_size = 2
+batch_size = 10
 # Количество изображений для обучения
 nb_train_samples = 100
 # Количество изображений для проверки
 nb_validation_samples = 30
 # Количество изображений для тестирования
 nb_test_samples = 320
+
+x_train, y_train = [], []
+for image_dir in range(1, 9):
+    print(image_dir)
+    for image_number in range(1, 101):
+        image_path = f'{train_dir}/{image_dir}/{image_number}.png'
+        image = plt.imread(image_path)[:,:,:3]
+        x_train.append(image)
+        y_train.append(image_dir)
+
+x_train = np.array(x_train)
+y_train = np.array(y_train)
+
+x_test, y_test = [], []
+for image_dir in range(1, 9):
+    print(image_dir)
+    for image_number in range(101, 121):
+        image_path = f'{test_dir}/{image_dir}/{image_number}.png'
+        image = plt.imread(image_path)[:,:,:3]
+        x_test.append(image)
+        y_test.append(image_dir)
+
+x_test = np.array(x_test)
+y_test = np.array(y_test)
+
+x_val, y_val = [], []
+for image_dir in range(1, 9):
+    print(image_dir)
+    for image_number in range(121, 151):
+        image_path = f'{val_dir}/{image_dir}/{image_number}.png'
+        image = plt.imread(image_path)[:, :, :3]
+        x_val.append(image)
+        y_val.append(image_dir)
+
+x_val = np.array(x_val)
+y_val = np.array(y_val)
+
+datagen = ImageDataGenerator()
+
+train_generator = datagen.flow(
+    x_train,
+    y_train,
+    batch_size=batch_size
+)
+
+test_generator = datagen.flow(
+    x_test,
+    y_test,
+    batch_size=batch_size,
+)
+
+val_generator = datagen.flow(
+    x_val,
+    y_val,
+    batch_size=batch_size,
+)
 
 model = Sequential()
 
@@ -51,26 +109,6 @@ model.compile(loss='sparse_categorical_crossentropy',
               metrics=['acc'])
 
 model.summary()
-
-datagen = ImageDataGenerator(rescale=1. / 255)
-
-train_generator = datagen.flow_from_directory(
-    train_dir,
-    target_size=(img_width, img_height),
-    batch_size=batch_size,
-    class_mode='sparse')
-
-val_generator = datagen.flow_from_directory(
-    val_dir,
-    target_size=(img_width, img_height),
-    batch_size=batch_size,
-    class_mode='sparse')
-
-test_generator = datagen.flow_from_directory(
-    test_dir,
-    target_size=(img_width, img_height),
-    batch_size=batch_size,
-    class_mode='sparse')
 
 history = model.fit(
     train_generator,

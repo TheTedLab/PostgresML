@@ -312,7 +312,8 @@ SELECT load_mnist('mnist', false);
 
 CREATE OR REPLACE FUNCTION show_sample(
     sample_table text,
-    sample_id integer)
+    sample_id integer,
+    color_map text DEFAULT 'viridis')
     RETURNS text
     LANGUAGE 'plpython3u'
 AS $BODY$
@@ -330,8 +331,9 @@ AS $BODY$
         bytes_img = sample[0][f'x_{sample_table}']
         array_img = pickle.loads(bytes_img)
 
-        plt.imshow(array_img)
+        plt.imshow(array_img, cmap=color_map)
         plt.savefig(f'D:\\saved-images\\sample-{sample_table}-{sample_id}.png')
+        plt.close()
 
         # get dataset name
         dataset_name = plpy.execute(
@@ -350,7 +352,9 @@ $BODY$;
 SELECT show_sample('train', 1);
 SELECT show_sample('test', 1);
 SELECT show_sample('val', 1);
-SELECT show_sample('train', 100);
+SELECT show_sample('train', 81, 'gray');
+SELECT show_sample('test', 17, 'gray');
+SELECT show_sample('val', 25, 'gray');
 
 CREATE OR REPLACE FUNCTION show_mnist(
     sample_table text,
@@ -512,7 +516,7 @@ AS $BODY$
             plt.close(fig)
 
             # load digital image to database
-            digital_image = skimage.io.imread(image_path)
+            digital_image = skimage.io.imread(image_path, as_gray=True)
             y_lable = sample[f'y_{table_name}']
 
             if table_name == 'train':
@@ -575,7 +579,7 @@ AS $BODY$
             plt.close(fig)
 
             # load noise image to database
-            noise_image = skimage.io.imread(image_path)
+            noise_image = skimage.io.imread(image_path, as_gray=True)
 
             if table_name == 'train':
                 plan = plpy.prepare("insert into train_table(dataset_id, x_train, y_train) values ($1, $2, $3)", ["int", "bytea", "int"])
@@ -701,24 +705,10 @@ AS $BODY$
                 table_name = 'x_val'
             array_img = pickle.loads(bytes_img)
 
-            # save for skimage conversion
-            fig = plt.figure(frameon=False)
-            fig.set_size_inches(0.06, 0.04)
-            ax = plt.Axes(fig, [0., 0., 1., 1.])
-            ax.set_axis_off()
-            fig.add_axes(ax)
-            ax.imshow(array_img, aspect='auto', cmap='Greys')
-            image_path = f'D:\\saved-images\\grayscale_image.png'
-            plt.savefig(image_path)
-            plt.close(fig)
-
-            # conversion to grayscale
-            grayscale_image = skimage.io.imread(image_path, as_gray=True)
-
             # get average digital image
-            for i in range(len(grayscale_image)):
-                for j in range(len(grayscale_image[0])):
-                    total_class_img[i][j] += grayscale_image[i][j]
+            for i in range(len(array_img)):
+                for j in range(len(array_img[0])):
+                    total_class_img[i][j] += array_img[i][j]
 
         average_img = np.true_divide(total_class_img, 15)
 
@@ -774,95 +764,137 @@ JOIN datasets d on val_table.dataset_id = d.dataset_id
 WHERE dataset_name = 'haralick-noised'
 ORDER BY sample_id;
 
-SELECT show_sample('train', 161);
-SELECT show_sample('test', 33);
-SELECT show_sample('val', 49);
+SELECT show_sample('train', 161, 'gray');
+SELECT show_sample('test', 33, 'gray');
+SELECT show_sample('val', 49, 'gray');
 
-CREATE OR REPLACE FUNCTION define_and_save_model(model_name text)
+CREATE OR REPLACE FUNCTION define_and_save_model(
+    dataset_name text,
+    is_val_table boolean,
+    is_noised_data boolean,
+    model_name text)
     RETURNS text
     LANGUAGE 'plpython3u'
 AS $BODY$
     import json
     import keras
+    import pickle
     import numpy as np
     import tensorflow as tf
     from keras.layers import Dense, Flatten, Conv2D, MaxPooling2D
     from datetime import datetime
     from tensorflow.python.keras.callbacks import LambdaCallback
 
-    def get_list_from_sql(name, table):
-        data_list = []
-        sql_data = plpy.execute(f"select {name} from {table} order by id")
-        for sample in sql_data:
-            if name not in ['y_train', 'y_test']:
-                array_img = np.ndarray(shape=(28, 28), dtype=np.float64, buffer=sample[f'{name}'])
-                data_list.append(array_img)
-            else:
-                data_list.append(list(sample.values()))
-        plpy.info(f"{name} loaded!")
-        return np.squeeze(np.asarray(data_list, dtype='float'))
+    dataset_postfix = None
+    if is_noised_data:
+        dataset_postfix = '-noised'
+    else:
+        dataset_postfix = ''
 
-    x_train = get_list_from_sql('x_train', 'train_table')
-    y_train = get_list_from_sql('y_train', 'train_table')
-    x_test = get_list_from_sql('x_test', 'test_table')
-    y_test = get_list_from_sql('y_test', 'test_table')
+    # check dataset_name(-noised) in database
+    dataset_ids = plpy.execute(f'select dataset_id from datasets where dataset_name = \'{dataset_name}{dataset_postfix}\'')
 
-    model = keras.models.Sequential([
-        Conv2D(32, (3, 3), activation='relu', input_shape=(28, 28, 1)),
-        MaxPooling2D((2, 2)),
-        Flatten(),
-        Dense(128, activation='relu'),
-        Dense(10, activation='softmax')
-    ])
+    if dataset_ids.nrows() == 0:
+        plpy.info(
+            f'Dataset {dataset_name} does not exists in database. '
+        )
+        return f'Dataset {dataset_name} does not exists in database. '
 
-    optimizer = 'adam'
+    x_train, y_train, x_test, y_test, x_val, y_val  = [], [], [], [], None, None
+    tables_list = ['train'] # ['train', 'test']
+    # if is_val_table:
+        # tables_list.append('val')
+    for table_name in tables_list:
+        samples = plpy.execute(
+            f'select x_{table_name}, y_{table_name} from {table_name}_table '
+            f'join datasets d on {table_name}_table.dataset_id = d.dataset_id '
+            f'where dataset_name = \'{dataset_name}{dataset_postfix}\''
+        )
 
-    model.compile(optimizer=optimizer,
-                  loss='sparse_categorical_crossentropy',
-                  metrics=['accuracy'])
+        if samples.nrows() == 0:
+            plpy.info(f'No samples in {table_name}_table for dataset with name \"{dataset_name}\".')
+            return f'No samples in {table_name}_table for dataset with name \"{dataset_name}\".'
 
-    summary = []
-    model.summary(print_fn=lambda x: summary.append(x))
-    plpy.notice('Model architecture:\n{}'.format('\n'.join(summary)))
+        if is_val_table:
+            x_val, y_val = [], []
+        for sample in samples[:1]:
+            bytes_img = sample[f'x_{table_name}']
+            x_data = pickle.loads(bytes_img)
+            y_data = sample[f'y_{table_name}']
 
-    logger = LambdaCallback(
-        on_epoch_end=lambda epoch,
-        logs: plpy.notice(f"epoch: {epoch}, accuracy {logs['accuracy']:.4f}, loss: {logs['loss']:.4f}")
-    )
+            if table_name == 'train':
+                x_train.append(x_data)
+                y_train.append(y_data)
+            elif table_name == 'test':
+                x_test.append(x_data)
+                y_test.append(y_data)
+            elif table_name == 'val':
+                x_val.append(x_data)
+                y_val.append(y_data)
 
-    plpy.notice('create logger')
+    # model = keras.models.Sequential([
+        # Conv2D(32, (3, 3), activation='relu', input_shape=(28, 28, 1)),
+        # MaxPooling2D((2, 2)),
+        # Flatten(),
+        # Dense(128, activation='relu'),
+        # Dense(10, activation='softmax')
+    # ])
 
-    history = model.fit(x_train,
-                        y_train,
-                        epochs=6,
-                        batch_size=64,
-                        validation_data=(x_test, y_test),
-                        verbose=False,
-                        callbacks=[logger])
+    # optimizer = 'adam'
 
-    plpy.notice('model fit complete')
+    # model.compile(optimizer=optimizer,
+                  # loss='sparse_categorical_crossentropy',
+                  # metrics=['accuracy'])
 
-    json_config = model.to_json()
-    model_weights = model.get_weights()
+    # summary = []
+    # model.summary(print_fn=lambda x: summary.append(x))
+    # plpy.notice('Model architecture:\n{}'.format('\n'.join(summary)))
 
-    for i in range(len(model_weights)):
-        model_weights[i] = model_weights[i].tolist()
+    # logger = LambdaCallback(
+        # on_epoch_end=lambda epoch,
+        # logs: plpy.notice(f"epoch: {epoch}, accuracy {logs['accuracy']:.4f}, loss: {logs['loss']:.4f}")
+    # )
 
-    json_weights = json.dumps(model_weights)
+    # plpy.notice('create logger')
 
-    plpy.notice('json conversions complete')
+    # history = model.fit(x_train,
+                        # y_train,
+                        # epochs=6,
+                        # batch_size=64,
+                        # validation_data=(x_test, y_test),
+                        # verbose=False,
+                        # callbacks=[logger])
 
-    plpy.execute(
-        f"insert into models_table (name, optimizer, model_config, model_weights)"
-        f"values ('{model_name}', '{optimizer}', '{json_config}', '{json_weights}')"
-    )
+    # plpy.notice('model fit complete')
+
+    # json_config = model.to_json()
+    # model_weights = model.get_weights()
+
+    # for i in range(len(model_weights)):
+        # model_weights[i] = model_weights[i].tolist()
+
+    # json_weights = json.dumps(model_weights)
+
+    # plpy.notice('json conversions complete')
+
+    # plpy.execute(
+        # f"insert into models_table (name, optimizer, model_config, model_weights)"
+        # f"values ('{model_name}', '{optimizer}', '{json_config}', '{json_weights}')"
+    # )
 
     return 'All is OK!'
 $BODY$;
 
 TRUNCATE TABLE models_table;
 SELECT * FROM models_table;
-SELECT define_and_save_model('conv2d-2');
+SELECT * FROM datasets;
+
+SELECT define_and_save_model(
+    'haralick',
+    true,
+    true,
+    'conv2d'
+);
 
 CREATE OR REPLACE FUNCTION load_and_test_model(model_name text)
     RETURNS text
