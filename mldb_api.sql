@@ -46,10 +46,6 @@ CREATE TABLE IF NOT EXISTS models_table
     model_weights jsonb
 );
 
-SELECT * FROM models_table;
-INSERT INTO models_table VALUES (2, 'conv2d-2', 1, 'adam');
-DELETE FROM models_table WHERE model_id = 2;
-
 CREATE OR REPLACE FUNCTION python_path()
 RETURNS text
 LANGUAGE 'plpython3u'
@@ -576,10 +572,10 @@ AS $BODY$
             ax.imshow(image, aspect='auto', cmap='gray')
             image_path = f'D:\\saved-images\\noise_image.png'
             plt.savefig(image_path)
-            plt.close(fig)
 
             # load noise image to database
-            noise_image = skimage.io.imread(image_path, as_gray=True)
+            noise_image = plt.imread(image_path)[:,:,:3]
+            plt.close(fig)
 
             if table_name == 'train':
                 plan = plpy.prepare("insert into train_table(dataset_id, x_train, y_train) values ($1, $2, $3)", ["int", "bytea", "int"])
@@ -781,8 +777,11 @@ AS $BODY$
     import pickle
     import numpy as np
     import tensorflow as tf
-    from keras.layers import Dense, Flatten, Conv2D, MaxPooling2D
     from datetime import datetime
+    from keras.preprocessing.image import ImageDataGenerator
+    from tensorflow.python.keras.models import Sequential
+    from tensorflow.python.keras.layers import Conv2D, MaxPooling2D
+    from tensorflow.python.keras.layers import Activation, Dropout, Flatten, Dense
     from tensorflow.python.keras.callbacks import LambdaCallback
 
     dataset_postfix = None
@@ -800,10 +799,12 @@ AS $BODY$
         )
         return f'Dataset {dataset_name} does not exists in database. '
 
+    dataset_id = dataset_ids[0]['dataset_id']
+
     x_train, y_train, x_test, y_test, x_val, y_val  = [], [], [], [], None, None
-    tables_list = ['train'] # ['train', 'test']
-    # if is_val_table:
-        # tables_list.append('val')
+    tables_list = ['train', 'test']
+    if is_val_table:
+        tables_list.append('val')
     for table_name in tables_list:
         samples = plpy.execute(
             f'select x_{table_name}, y_{table_name} from {table_name}_table '
@@ -817,7 +818,7 @@ AS $BODY$
 
         if is_val_table:
             x_val, y_val = [], []
-        for sample in samples[:1]:
+        for sample in samples:
             bytes_img = sample[f'x_{table_name}']
             x_data = pickle.loads(bytes_img)
             y_data = sample[f'y_{table_name}']
@@ -832,55 +833,114 @@ AS $BODY$
                 x_val.append(x_data)
                 y_val.append(y_data)
 
-    # model = keras.models.Sequential([
-        # Conv2D(32, (3, 3), activation='relu', input_shape=(28, 28, 1)),
-        # MaxPooling2D((2, 2)),
-        # Flatten(),
-        # Dense(128, activation='relu'),
-        # Dense(10, activation='softmax')
-    # ])
+    x_train = np.array(x_train)
+    y_train = np.array(y_train)
 
-    # optimizer = 'adam'
+    x_test = np.array(x_test)
+    y_test = np.array(y_test)
 
-    # model.compile(optimizer=optimizer,
-                  # loss='sparse_categorical_crossentropy',
-                  # metrics=['accuracy'])
+    x_val = np.array(x_val)
+    y_val = np.array(y_val)
 
-    # summary = []
-    # model.summary(print_fn=lambda x: summary.append(x))
-    # plpy.notice('Model architecture:\n{}'.format('\n'.join(summary)))
+    # Размеры изображения
+    img_width, img_height = 4, 6
+    # Размерность тензора на основе изображения для входных данных в нейронную сеть
+    input_shape = (img_width, img_height, 3)
+    # Количество эпох
+    epochs = 200
+    # Размер мини-выборки
+    batch_size = 10
+    # Количество изображений для обучения
+    nb_train_samples = 100
+    # Количество изображений для проверки
+    nb_validation_samples = 30
+    # Количество изображений для тестирования
+    nb_test_samples = 320
 
-    # logger = LambdaCallback(
-        # on_epoch_end=lambda epoch,
-        # logs: plpy.notice(f"epoch: {epoch}, accuracy {logs['accuracy']:.4f}, loss: {logs['loss']:.4f}")
-    # )
+    datagen = ImageDataGenerator()
 
-    # plpy.notice('create logger')
+    train_generator = datagen.flow(
+        x_train,
+        y_train,
+        batch_size=batch_size
+    )
 
-    # history = model.fit(x_train,
-                        # y_train,
-                        # epochs=6,
-                        # batch_size=64,
-                        # validation_data=(x_test, y_test),
-                        # verbose=False,
-                        # callbacks=[logger])
+    test_generator = datagen.flow(
+        x_test,
+        y_test,
+        batch_size=batch_size,
+    )
 
-    # plpy.notice('model fit complete')
+    val_generator = datagen.flow(
+        x_val,
+        y_val,
+        batch_size=batch_size,
+    )
 
-    # json_config = model.to_json()
-    # model_weights = model.get_weights()
+    model = Sequential()
 
-    # for i in range(len(model_weights)):
-        # model_weights[i] = model_weights[i].tolist()
+    model.add(Conv2D(32, (2, 2), input_shape=input_shape))
+    model.add(Activation('relu'))
+    model.add(MaxPooling2D(pool_size=(2, 2)))
 
-    # json_weights = json.dumps(model_weights)
+    model.add(Conv2D(64, (1, 1)))
+    model.add(Activation('relu'))
+    model.add(MaxPooling2D(pool_size=(1, 1)))
 
-    # plpy.notice('json conversions complete')
+    model.add(Flatten())
+    model.add(Dense(20))
+    model.add(Activation('relu'))
 
-    # plpy.execute(
-        # f"insert into models_table (name, optimizer, model_config, model_weights)"
-        # f"values ('{model_name}', '{optimizer}', '{json_config}', '{json_weights}')"
-    # )
+    model.add(Dropout(0.25))
+
+    model.add(Dense(10))
+    model.add(Activation('softmax'))
+
+    optimizer = 'adam'
+
+    model.compile(loss='sparse_categorical_crossentropy',
+                  optimizer=optimizer,
+                  metrics=['accuracy'])
+
+    summary = []
+    model.summary(print_fn=lambda x: summary.append(x))
+    plpy.notice('Model architecture:\n{}'.format('\n'.join(summary)))
+
+    logger = LambdaCallback(
+        on_epoch_end=lambda epoch,
+        logs: plpy.notice(
+            f"epoch: {epoch + 1}, acc: {logs['accuracy']:.4f}, loss: {logs['loss']:.4f} "
+            f"val_acc: {logs['val_accuracy']:.4f}, val_loss: {logs['val_loss']:.4f}"
+        )
+    )
+
+    plpy.notice('create logger')
+
+    history = model.fit(train_generator,
+                        steps_per_epoch=nb_train_samples // batch_size,
+                        validation_data=val_generator,
+                        validation_steps=nb_validation_samples // batch_size,
+                        epochs=epochs,
+                        shuffle=True,
+                        verbose=False,
+                        callbacks=[logger])
+
+    plpy.notice('model fit complete')
+
+    json_config = model.to_json()
+    model_weights = model.get_weights()
+
+    for i in range(len(model_weights)):
+        model_weights[i] = model_weights[i].tolist()
+
+    json_weights = json.dumps(model_weights)
+
+    plpy.notice('json conversions complete')
+
+    plpy.execute(
+        f"insert into models_table (model_name, dataset_id, optimizer, model_config, model_weights)"
+        f"values ('{model_name}', {dataset_id}, '{optimizer}', '{json_config}', '{json_weights}')"
+    )
 
     return 'All is OK!'
 $BODY$;
@@ -893,7 +953,7 @@ SELECT define_and_save_model(
     'haralick',
     true,
     true,
-    'conv2d'
+    'conv2d-4'
 );
 
 CREATE OR REPLACE FUNCTION load_and_test_model(model_name text)
@@ -902,36 +962,59 @@ CREATE OR REPLACE FUNCTION load_and_test_model(model_name text)
 AS $BODY$
     import json
     import keras
+    import pickle
     import numpy as np
     import tensorflow as tf
+    from keras.preprocessing.image import ImageDataGenerator
 
-    def get_list_from_sql(name, table):
-        data_list = []
-        sql_data = plpy.execute(f"select {name} from {table} order by id")
-        for sample in sql_data:
-            if name not in ['y_train', 'y_test']:
-                array_img = np.ndarray(shape=(28, 28), dtype=np.float64, buffer=sample[f'{name}'])
-                data_list.append(array_img)
-            else:
-                data_list.append(list(sample.values()))
-        plpy.info(f"{name} loaded!")
-        return np.squeeze(np.asarray(data_list, dtype='float'))
-
-    models_names = plpy.execute(f"select name from models_table")
+    models_names = plpy.execute(f"select model_name from models_table")
     existing_names = []
     for sql_name in models_names:
-        existing_names.append(sql_name['name'])
+        existing_names.append(sql_name['model_name'])
 
     if model_name not in existing_names:
         return f"Model with name '{model_name} does not exist in the database!'"
 
-    x_test = get_list_from_sql('x_test', 'test_table')
-    y_test = get_list_from_sql('y_test', 'test_table')
+    model_dataset_id = plpy.execute(f'select dataset_id from models_table where model_name = \'{model_name}\'')[0]['dataset_id']
 
-    model_config = plpy.execute(f"select model_config from models_table where name = '{model_name}'")
+    x_test, y_test  = [], []
+    samples = plpy.execute(
+        f'select x_test, y_test from test_table '
+        f'where dataset_id = {model_dataset_id}'
+    )
+
+    if samples.nrows() == 0:
+        plpy.info(f'No samples in {table_name}_table for dataset with id \"{model_dataset_id}\".')
+        return f'No samples in {table_name}_table for dataset with id \"{model_dataset_id}\".'
+
+    for sample in samples:
+        bytes_img = sample[f'x_test']
+        x_data = pickle.loads(bytes_img)
+        y_data = sample[f'y_test']
+
+        x_test.append(x_data)
+        y_test.append(y_data)
+
+    x_test = np.array(x_test)
+    y_test = np.array(y_test)
+
+    # Размер мини-выборки
+    batch_size = 10
+    # Количество изображений для тестирования
+    nb_test_samples = 320
+
+    datagen = ImageDataGenerator()
+
+    test_generator = datagen.flow(
+        x_test,
+        y_test,
+        batch_size=batch_size,
+    )
+
+    model_config = plpy.execute(f"select model_config from models_table where model_name = '{model_name}'")
     new_model = keras.models.model_from_json(model_config[0]['model_config'])
 
-    model_weights = plpy.execute(f"select model_weights from models_table where name = '{model_name}'")
+    model_weights = plpy.execute(f"select model_weights from models_table where model_name = '{model_name}'")
 
     json_weights = json.loads(model_weights[0]['model_weights'])
 
@@ -940,21 +1023,21 @@ AS $BODY$
 
     new_model.set_weights(json_weights)
 
-    new_optimizer = plpy.execute(f"select optimizer from models_table where name = '{model_name}'")
+    new_optimizer = plpy.execute(f"select optimizer from models_table where model_name = '{model_name}'")
 
     new_model.compile(optimizer=new_optimizer[0]['optimizer'],
                   loss='sparse_categorical_crossentropy',
                   metrics=['accuracy'])
 
-    score = new_model.evaluate(x_test, y_test, verbose=0)
-    plpy.notice(f"Test loss: {score[0]}")
-    plpy.notice(f"Test accuracy: {score[1]}")
+    test_loss, test_acc = new_model.evaluate(test_generator, steps=nb_test_samples // batch_size)
+    plpy.notice(f"Test loss: {test_loss}")
+    plpy.notice(f"Test accuracy: {test_acc}")
 
     return 'All is OK!'
 $BODY$;
 
 SELECT * FROM models_table;
-SELECT load_and_test_model('conv2d-2');
+SELECT load_and_test_model('conv2d-4');
 
 CREATE OR REPLACE FUNCTION test_random_sample(model_name text)
     RETURNS text
