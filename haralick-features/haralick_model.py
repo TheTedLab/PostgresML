@@ -2,6 +2,7 @@ import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation
 from keras.preprocessing.image import ImageDataGenerator
 from tensorflow.python.keras.models import Sequential
 from tensorflow.python.keras.layers import Conv2D, MaxPooling2D
@@ -179,3 +180,54 @@ plt.show()
 
 test_loss, test_acc = model.evaluate(test_generator, steps=nb_test_samples // batch_size)
 print("Loss: ", test_loss, "Accuracy:", test_acc)
+
+epochs_x, acc_y, val_acc_y, loss_y, val_loss_y = [], [], [], [], []
+
+def animate(i):
+    print(i)
+    if i % 6 == 0 and i < 1200:
+        epochs_x.append(epochs[i // 6])
+        acc_y.append(acc[i // 6])
+        val_acc_y.append(val_acc[i // 6])
+        loss_y.append(loss[i // 6])
+        val_loss_y.append(val_loss[i // 6])
+
+    plt.clf()
+    plt.subplot(2, 2, 1)
+    plt.plot(epochs_x, smooth_curve(acc_y), 'bo', label='Training acc')
+    plt.plot(epochs_x, smooth_curve(val_acc_y), color='orange', label='Validation acc')
+    # plt.xlim([0, 200])
+    # plt.ylim([0.0, 1.0])
+    plt.legend(loc='lower right')
+    plt.title('Training and validation accuracy')
+
+    plt.subplot(2, 2, 2)
+    plt.plot(epochs_x, smooth_curve(loss_y), 'bo', label='Training loss')
+    plt.plot(epochs_x, smooth_curve(val_loss_y), color='orange', label='Validation loss')
+    # plt.xlim([0, 200])
+    # plt.ylim([0.0, 3.0])
+    plt.legend(loc='lower left')
+    plt.title('Training and validation loss')
+
+    plt.subplot(2, 2, 3)
+    plt.plot(epochs_x, acc_y, 'bo', label='Training acc')
+    plt.plot(epochs_x, val_acc_y, color='orange', label='Validation acc')
+    # plt.xlim([0, 200])
+    # plt.ylim([0.0, 1.0])
+    plt.legend(loc='lower right')
+    plt.title('Training and validation accuracy')
+
+    plt.subplot(2, 2, 4)
+    plt.plot(epochs_x, loss_y, 'bo', label='Training loss')
+    plt.plot(epochs_x, val_loss_y, color='orange', label='Validation loss')
+    # plt.xlim([0, 200])
+    # plt.ylim([0.0, 3.0])
+    plt.legend(loc='lower left')
+    plt.title('Training and validation loss')
+    plt.tight_layout()
+
+
+fig = plt.figure(figsize=(19.2, 10.8), dpi=100)
+ani = FuncAnimation(fig, animate, frames=1500, interval=1000)
+
+ani.save('results.mp4', writer = 'ffmpeg', fps = 60)

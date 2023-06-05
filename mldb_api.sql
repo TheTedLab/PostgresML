@@ -764,6 +764,8 @@ SELECT show_sample('train', 161, 'gray');
 SELECT show_sample('test', 33, 'gray');
 SELECT show_sample('val', 49, 'gray');
 
+-- TO DO: remove test data and test_generator
+-- TO DO: redo model creation and base arguments def (ex: epochs, batch_size, etc.)
 CREATE OR REPLACE FUNCTION define_and_save_model(
     dataset_name text,
     is_val_table boolean,
@@ -956,6 +958,8 @@ SELECT define_and_save_model(
     'conv2d-4'
 );
 
+-- TO DO: test and update function for only test data
+-- TO DO: add graph and matrix creation
 CREATE OR REPLACE FUNCTION load_and_test_model(model_name text)
     RETURNS text
     LANGUAGE 'plpython3u'
