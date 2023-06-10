@@ -96,17 +96,20 @@ LANGUAGE 'plpython3u'
 AS $BODY$
     import numpy
     import skimage
+    import sklearn
     import scipy
     import tifffile
 
     versions = {
         'numpy': numpy.__version__,
         'skimage': skimage.__version__,
+        'sklearn': sklearn.__version__,
         'scipy': scipy.__version__,
         'tifffile': tifffile.__version__
     }
     plpy.notice(f"numpy=={versions['numpy']}")
     plpy.notice(f"scikit-image=={versions['skimage']}")
+    plpy.notice(f"scikit-learn=={versions['sklearn']}")
     plpy.notice(f"scipy=={versions['scipy']}")
     plpy.notice(f"tifffile=={versions['tifffile']}")
 
@@ -764,8 +767,6 @@ SELECT show_sample('train', 161, 'gray');
 SELECT show_sample('test', 33, 'gray');
 SELECT show_sample('val', 49, 'gray');
 
--- TO DO: remove test data and test_generator
--- TO DO: redo model creation and base arguments def (ex: epochs, batch_size, etc.)
 CREATE OR REPLACE FUNCTION define_and_save_model(
     dataset_name text,
     is_val_table boolean,
@@ -779,6 +780,7 @@ AS $BODY$
     import pickle
     import numpy as np
     import tensorflow as tf
+    import matplotlib.pyplot as plt
     from datetime import datetime
     from keras.preprocessing.image import ImageDataGenerator
     from tensorflow.python.keras.models import Sequential
@@ -838,26 +840,31 @@ AS $BODY$
     x_train = np.array(x_train)
     y_train = np.array(y_train)
 
-    x_test = np.array(x_test)
-    y_test = np.array(y_test)
+    if is_val_table:
+        x_val = np.array(x_val)
+        y_val = np.array(y_val)
+    else:
+        x_val = np.array(x_test)
+        y_val = np.array(y_test)
 
-    x_val = np.array(x_val)
-    y_val = np.array(y_val)
+    # get amount of classes
+    classes_num = plpy.execute(
+        f'select count(distinct y_train) from train_table '
+        f'join datasets d on train_table.dataset_id = d.dataset_id '
+        f'where dataset_name = \'{dataset_name}{dataset_postfix}\';'
+    )[0]['count']
 
-    # Размеры изображения
-    img_width, img_height = 4, 6
-    # Размерность тензора на основе изображения для входных данных в нейронную сеть
-    input_shape = (img_width, img_height, 3)
-    # Количество эпох
+    # input shape dimension for image data in format: (width, height, channels)
+    input_shape = (4, 6, 3)
+    # amount of epochs
     epochs = 200
-    # Размер мини-выборки
+    # mini-batch size
     batch_size = 10
-    # Количество изображений для обучения
-    nb_train_samples = 100
-    # Количество изображений для проверки
-    nb_validation_samples = 30
-    # Количество изображений для тестирования
-    nb_test_samples = 320
+
+    # amount of samples for training
+    nb_train_samples = int(len(x_train) / classes_num)
+    # amount of samples for validation
+    nb_validation_samples = int(len(x_val) / classes_num)
 
     datagen = ImageDataGenerator()
 
@@ -865,12 +872,6 @@ AS $BODY$
         x_train,
         y_train,
         batch_size=batch_size
-    )
-
-    test_generator = datagen.flow(
-        x_test,
-        y_test,
-        batch_size=batch_size,
     )
 
     val_generator = datagen.flow(
@@ -929,6 +930,66 @@ AS $BODY$
 
     plpy.notice('model fit complete')
 
+    acc = history.history['accuracy']
+    val_acc = history.history['val_accuracy']
+    loss = history.history['loss']
+    val_loss = history.history['val_loss']
+
+    epochs = range(len(acc))
+
+    plt.figure()
+    plt.plot(epochs,
+             acc, 'bo', label='Training acc')
+    plt.plot(epochs,
+             val_acc, color='orange', label='Validation acc')
+    plt.title('Training and validation accuracy')
+    plt.legend()
+    accuracy_path = f'D:\\saved-images\\graphs\\{model_name}-train-and-val-acc.png'
+    plt.savefig(accuracy_path, bbox_inches='tight')
+
+    plt.figure()
+    plt.plot(epochs,
+             loss, 'bo', label='Smoothed training loss')
+    plt.plot(epochs,
+             val_loss, color='orange', label='Smoothed validation loss')
+    plt.title('Training and validation loss')
+    plt.legend()
+    loss_path = f'D:\\saved-images\\graphs\\{model_name}-train-and-val-loss.png'
+    plt.savefig(loss_path, bbox_inches='tight')
+
+    def smooth_curve(points, factor=0.8):
+        smoothed_points = []
+        for point in points:
+            if smoothed_points:
+                previous = smoothed_points[-1]
+                smoothed_points.append(previous * factor + point * (1 - factor))
+            else:
+                smoothed_points.append(point)
+        return smoothed_points
+
+    plt.figure()
+    plt.plot(epochs,
+             smooth_curve(acc), 'bo', label='Training acc')
+    plt.plot(epochs,
+             smooth_curve(val_acc), color='orange', label='Validation acc')
+    plt.title('Training and validation accuracy')
+    plt.legend()
+    smooth_accuracy_path = f'D:\\saved-images\\graphs\\{model_name}-smooth-train-and-val-acc.png'
+    plt.savefig(smooth_accuracy_path, bbox_inches='tight')
+
+    plt.figure()
+    plt.plot(epochs,
+             smooth_curve(loss), 'bo', label='Training loss')
+    plt.plot(epochs,
+             smooth_curve(val_loss), color='orange', label='Validation loss')
+    plt.title('Training and validation loss')
+    plt.legend()
+    smooth_loss_path = f'D:\\saved-images\\graphs\\{model_name}-smooth-train-and-val-loss.png'
+    plt.savefig(smooth_loss_path, bbox_inches='tight')
+    plt.close()
+
+    plpy.notice('graphs draw complete')
+
     json_config = model.to_json()
     model_weights = model.get_weights()
 
@@ -958,8 +1019,6 @@ SELECT define_and_save_model(
     'conv2d-4'
 );
 
--- TO DO: test and update function for only test data
--- TO DO: add graph and matrix creation
 CREATE OR REPLACE FUNCTION load_and_test_model(model_name text)
     RETURNS text
     LANGUAGE 'plpython3u'
@@ -969,7 +1028,8 @@ AS $BODY$
     import pickle
     import numpy as np
     import tensorflow as tf
-    from keras.preprocessing.image import ImageDataGenerator
+    import matplotlib.pyplot as plt
+    from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 
     models_names = plpy.execute(f"select model_name from models_table")
     existing_names = []
@@ -977,7 +1037,8 @@ AS $BODY$
         existing_names.append(sql_name['model_name'])
 
     if model_name not in existing_names:
-        return f"Model with name '{model_name} does not exist in the database!'"
+        plpy.info(f'Model with name \'{model_name}\' does not exist in the database!')
+        return f'Model with name \'{model_name}\' does not exist in the database!'
 
     model_dataset_id = plpy.execute(f'select dataset_id from models_table where model_name = \'{model_name}\'')[0]['dataset_id']
 
@@ -988,8 +1049,11 @@ AS $BODY$
     )
 
     if samples.nrows() == 0:
-        plpy.info(f'No samples in {table_name}_table for dataset with id \"{model_dataset_id}\".')
-        return f'No samples in {table_name}_table for dataset with id \"{model_dataset_id}\".'
+        dataset_name = plpy.execute(
+            f'select dataset_name from datasets where dataset_id = {model_dataset_id}'
+        )[0]['dataset_name']
+        plpy.info(f'No samples in test_table for dataset with name \"{dataset_name}\".')
+        return f'No samples in test_table for dataset with name \"{dataset_name}\".'
 
     for sample in samples:
         bytes_img = sample[f'x_test']
@@ -1001,19 +1065,6 @@ AS $BODY$
 
     x_test = np.array(x_test)
     y_test = np.array(y_test)
-
-    # Размер мини-выборки
-    batch_size = 10
-    # Количество изображений для тестирования
-    nb_test_samples = 320
-
-    datagen = ImageDataGenerator()
-
-    test_generator = datagen.flow(
-        x_test,
-        y_test,
-        batch_size=batch_size,
-    )
 
     model_config = plpy.execute(f"select model_config from models_table where model_name = '{model_name}'")
     new_model = keras.models.model_from_json(model_config[0]['model_config'])
@@ -1033,9 +1084,42 @@ AS $BODY$
                   loss='sparse_categorical_crossentropy',
                   metrics=['accuracy'])
 
-    test_loss, test_acc = new_model.evaluate(test_generator, steps=nb_test_samples // batch_size)
+    test_loss, test_acc = new_model.evaluate(x_test, y_test)
     plpy.notice(f"Test loss: {test_loss}")
     plpy.notice(f"Test accuracy: {test_acc}")
+
+    y_pred_raw = new_model.predict(x_test)
+
+    y_pred = np.argmax(y_pred_raw, axis=1)
+
+    cm = confusion_matrix(y_test, y_pred, labels=np.arange(1, 9, 1), normalize='true')
+    disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=np.arange(1, 9, 1))
+    fig, ax = plt.subplots(figsize=(10, 10))
+    disp.plot(cmap='Greens', ax=ax)
+    ax.set_xlabel('Предсказанные метки', fontsize=16)
+    ax.set_ylabel('Истинные метки', fontsize=16)
+    ax.set_title('Матрица ошибок', fontsize=20)
+    ax.set_xticks(np.arange(0, 8, 1), labels=np.arange(1, 9, 1), fontsize=16)
+    ax.set_yticks(np.arange(0, 8, 1), labels=np.arange(1, 9, 1), fontsize=16)
+    plt.tight_layout()
+    confusion_matrix_norm_path = f'D:\\saved-images\\graphs\\{model_name}-confusion-matrix-normalized.png'
+    plt.savefig(confusion_matrix_norm_path, bbox_inches='tight')
+    plt.clf()
+
+    cm = confusion_matrix(y_test, y_pred, labels=np.arange(1, 9, 1))
+    disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=np.arange(1, 9, 1))
+    fig, ax = plt.subplots(figsize=(10, 10))
+    disp.plot(cmap='Greens', ax=ax)
+    ax.set_xlabel('Предсказанные метки', fontsize=16)
+    ax.set_ylabel('Истинные метки', fontsize=16)
+    ax.set_title('Матрица ошибок', fontsize=20)
+    ax.set_xticks(np.arange(0, 8, 1), labels=np.arange(1, 9, 1), fontsize=16)
+    ax.set_yticks(np.arange(0, 8, 1), labels=np.arange(1, 9, 1), fontsize=16)
+    plt.tight_layout()
+    confusion_matrix_path = f'D:\\saved-images\\graphs\\{model_name}-confusion-matrix.png'
+    plt.savefig(confusion_matrix_path, bbox_inches='tight')
+    plt.clf()
+    plt.close(fig)
 
     return 'All is OK!'
 $BODY$;

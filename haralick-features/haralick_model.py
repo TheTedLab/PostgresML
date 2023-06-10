@@ -3,6 +3,7 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 from keras.preprocessing.image import ImageDataGenerator
 from tensorflow.python.keras.models import Sequential
 from tensorflow.python.keras.layers import Conv2D, MaxPooling2D
@@ -177,9 +178,44 @@ plt.legend()
 
 plt.savefig('graphs/final-smooth-haralick-model-train-and-val-loss.png', bbox_inches='tight')
 plt.show()
+plt.clf()
 
 test_loss, test_acc = model.evaluate(test_generator, steps=nb_test_samples // batch_size)
 print("Loss: ", test_loss, "Accuracy:", test_acc)
+
+y_pred_raw = model.predict(x_test)
+
+y_pred = np.argmax(y_pred_raw, axis=1)
+
+cm = confusion_matrix(y_test, y_pred, labels=np.arange(1, 9, 1), normalize='true')
+disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=np.arange(1, 9, 1))
+fig, ax = plt.subplots(figsize=(10, 10))
+disp.plot(cmap='Greens', ax=ax)
+ax.set_xlabel('Предсказанные метки', fontsize=16)
+ax.set_ylabel('Истинные метки', fontsize=16)
+ax.set_title('Матрица ошибок', fontsize=20)
+ax.set_xticks(np.arange(0, 8, 1), labels=np.arange(1, 9, 1), fontsize=16)
+ax.set_yticks(np.arange(0, 8, 1), labels=np.arange(1, 9, 1), fontsize=16)
+plt.tight_layout()
+plt.savefig(f'graphs/confusion-matrix-normalized.png', bbox_inches='tight')
+plt.show()
+plt.clf()
+
+cm = confusion_matrix(y_test, y_pred, labels=np.arange(1, 9, 1))
+disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=np.arange(1, 9, 1))
+fig, ax = plt.subplots(figsize=(10, 10))
+disp.plot(cmap='Greens', ax=ax)
+ax.set_xlabel('Предсказанные метки', fontsize=16)
+ax.set_ylabel('Истинные метки', fontsize=16)
+ax.set_title('Матрица ошибок', fontsize=20)
+ax.set_xticks(np.arange(0, 8, 1), labels=np.arange(1, 9, 1), fontsize=16)
+ax.set_yticks(np.arange(0, 8, 1), labels=np.arange(1, 9, 1), fontsize=16)
+plt.tight_layout()
+plt.savefig(f'graphs/confusion-matrix.png', bbox_inches='tight')
+plt.show()
+plt.clf()
+plt.close(fig)
+
 
 epochs_x, acc_y, val_acc_y, loss_y, val_loss_y = [], [], [], [], []
 
