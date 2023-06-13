@@ -46,10 +46,6 @@ CREATE TABLE IF NOT EXISTS models_table
     model_weights jsonb
 );
 
-SELECT * FROM models_table;
-INSERT INTO models_table VALUES (2, 'conv2d-2', 1, 'adam');
-DELETE FROM models_table WHERE model_id = 2;
-
 CREATE OR REPLACE FUNCTION python_path()
 RETURNS text
 LANGUAGE 'plpython3u'
@@ -100,17 +96,20 @@ LANGUAGE 'plpython3u'
 AS $BODY$
     import numpy
     import skimage
+    import sklearn
     import scipy
     import tifffile
 
     versions = {
         'numpy': numpy.__version__,
         'skimage': skimage.__version__,
+        'sklearn': sklearn.__version__,
         'scipy': scipy.__version__,
         'tifffile': tifffile.__version__
     }
     plpy.notice(f"numpy=={versions['numpy']}")
     plpy.notice(f"scikit-image=={versions['skimage']}")
+    plpy.notice(f"scikit-learn=={versions['sklearn']}")
     plpy.notice(f"scipy=={versions['scipy']}")
     plpy.notice(f"tifffile=={versions['tifffile']}")
 
@@ -153,7 +152,7 @@ AS $BODY$
             sample_dir = os.path.join(class_dir, sample)
             image = skimage.io.imread(sample_dir)
             x_train.append(image)
-            y_train.append(class_id)
+            y_train.append(str(int(class_id) - 1))
 
     for i in range(len(x_train)):
         plan = plpy.prepare("insert into train_table(dataset_id, x_train, y_train) values ($1, $2, $3)", ["int", "bytea", "int"])
@@ -173,7 +172,7 @@ AS $BODY$
             sample_dir = os.path.join(class_dir, sample)
             image = skimage.io.imread(sample_dir)
             x_test.append(image)
-            y_test.append(class_id)
+            y_test.append(str(int(class_id) - 1))
 
     for i in range(len(x_test)):
         plan = plpy.prepare("insert into test_table(dataset_id, x_test, y_test) values ($1, $2, $3)", ["int", "bytea", "int"])
@@ -197,7 +196,7 @@ AS $BODY$
                 sample_dir = os.path.join(class_dir, sample)
                 image = skimage.io.imread(sample_dir)
                 x_val.append(image)
-                y_val.append(class_id)
+                y_val.append(str(int(class_id) - 1))
 
         for i in range(len(x_val)):
             plan = plpy.prepare("insert into val_table(dataset_id, x_val, y_val) values ($1, $2, $3)", ["int", "bytea", "int"])
@@ -312,7 +311,8 @@ SELECT load_mnist('mnist', false);
 
 CREATE OR REPLACE FUNCTION show_sample(
     sample_table text,
-    sample_id integer)
+    sample_id integer,
+    color_map text DEFAULT 'viridis')
     RETURNS text
     LANGUAGE 'plpython3u'
 AS $BODY$
@@ -330,8 +330,10 @@ AS $BODY$
         bytes_img = sample[0][f'x_{sample_table}']
         array_img = pickle.loads(bytes_img)
 
-        plt.imshow(array_img)
+        plt.clf()
+        plt.imshow(array_img, cmap=color_map)
         plt.savefig(f'D:\\saved-images\\sample-{sample_table}-{sample_id}.png')
+        plt.close()
 
         # get dataset name
         dataset_name = plpy.execute(
@@ -350,7 +352,9 @@ $BODY$;
 SELECT show_sample('train', 1);
 SELECT show_sample('test', 1);
 SELECT show_sample('val', 1);
-SELECT show_sample('train', 100);
+SELECT show_sample('train', 81, 'gray');
+SELECT show_sample('test', 17, 'gray');
+SELECT show_sample('val', 25, 'gray');
 
 CREATE OR REPLACE FUNCTION show_mnist(
     sample_table text,
@@ -512,7 +516,7 @@ AS $BODY$
             plt.close(fig)
 
             # load digital image to database
-            digital_image = skimage.io.imread(image_path)
+            digital_image = skimage.io.imread(image_path, as_gray=True)
             y_lable = sample[f'y_{table_name}']
 
             if table_name == 'train':
@@ -572,10 +576,10 @@ AS $BODY$
             ax.imshow(image, aspect='auto', cmap='gray')
             image_path = f'D:\\saved-images\\noise_image.png'
             plt.savefig(image_path)
-            plt.close(fig)
 
             # load noise image to database
-            noise_image = skimage.io.imread(image_path)
+            noise_image = plt.imread(image_path)[:,:,:3]
+            plt.close(fig)
 
             if table_name == 'train':
                 plan = plpy.prepare("insert into train_table(dataset_id, x_train, y_train) values ($1, $2, $3)", ["int", "bytea", "int"])
@@ -701,24 +705,10 @@ AS $BODY$
                 table_name = 'x_val'
             array_img = pickle.loads(bytes_img)
 
-            # save for skimage conversion
-            fig = plt.figure(frameon=False)
-            fig.set_size_inches(0.06, 0.04)
-            ax = plt.Axes(fig, [0., 0., 1., 1.])
-            ax.set_axis_off()
-            fig.add_axes(ax)
-            ax.imshow(array_img, aspect='auto', cmap='Greys')
-            image_path = f'D:\\saved-images\\grayscale_image.png'
-            plt.savefig(image_path)
-            plt.close(fig)
-
-            # conversion to grayscale
-            grayscale_image = skimage.io.imread(image_path, as_gray=True)
-
             # get average digital image
-            for i in range(len(grayscale_image)):
-                for j in range(len(grayscale_image[0])):
-                    total_class_img[i][j] += grayscale_image[i][j]
+            for i in range(len(array_img)):
+                for j in range(len(array_img[0])):
+                    total_class_img[i][j] += array_img[i][j]
 
         average_img = np.true_divide(total_class_img, 15)
 
@@ -774,51 +764,146 @@ JOIN datasets d on val_table.dataset_id = d.dataset_id
 WHERE dataset_name = 'haralick-noised'
 ORDER BY sample_id;
 
-SELECT show_sample('train', 161);
-SELECT show_sample('test', 33);
-SELECT show_sample('val', 49);
+SELECT show_sample('train', 161, 'gray');
+SELECT show_sample('test', 33, 'gray');
+SELECT show_sample('val', 49, 'gray');
 
-CREATE OR REPLACE FUNCTION define_and_save_model(model_name text)
+CREATE OR REPLACE FUNCTION define_and_save_model(
+    dataset_name text,
+    is_val_table boolean,
+    is_noised_data boolean,
+    model_name text)
     RETURNS text
     LANGUAGE 'plpython3u'
 AS $BODY$
     import json
     import keras
+    import pickle
     import numpy as np
     import tensorflow as tf
-    from keras.layers import Dense, Flatten, Conv2D, MaxPooling2D
+    import matplotlib.pyplot as plt
     from datetime import datetime
+    from keras.preprocessing.image import ImageDataGenerator
+    from tensorflow.python.keras.models import Sequential
+    from tensorflow.python.keras.layers import Conv2D, MaxPooling2D
+    from tensorflow.python.keras.layers import Activation, Dropout, Flatten, Dense
     from tensorflow.python.keras.callbacks import LambdaCallback
 
-    def get_list_from_sql(name, table):
-        data_list = []
-        sql_data = plpy.execute(f"select {name} from {table} order by id")
-        for sample in sql_data:
-            if name not in ['y_train', 'y_test']:
-                array_img = np.ndarray(shape=(28, 28), dtype=np.float64, buffer=sample[f'{name}'])
-                data_list.append(array_img)
-            else:
-                data_list.append(list(sample.values()))
-        plpy.info(f"{name} loaded!")
-        return np.squeeze(np.asarray(data_list, dtype='float'))
+    dataset_postfix = None
+    if is_noised_data:
+        dataset_postfix = '-noised'
+    else:
+        dataset_postfix = ''
 
-    x_train = get_list_from_sql('x_train', 'train_table')
-    y_train = get_list_from_sql('y_train', 'train_table')
-    x_test = get_list_from_sql('x_test', 'test_table')
-    y_test = get_list_from_sql('y_test', 'test_table')
+    # check dataset_name(-noised) in database
+    dataset_ids = plpy.execute(f'select dataset_id from datasets where dataset_name = \'{dataset_name}{dataset_postfix}\'')
 
-    model = keras.models.Sequential([
-        Conv2D(32, (3, 3), activation='relu', input_shape=(28, 28, 1)),
-        MaxPooling2D((2, 2)),
-        Flatten(),
-        Dense(128, activation='relu'),
-        Dense(10, activation='softmax')
-    ])
+    if dataset_ids.nrows() == 0:
+        plpy.info(
+            f'Dataset {dataset_name} does not exists in database. '
+        )
+        return f'Dataset {dataset_name} does not exists in database. '
+
+    dataset_id = dataset_ids[0]['dataset_id']
+
+    x_train, y_train, x_test, y_test, x_val, y_val  = [], [], [], [], None, None
+    tables_list = ['train', 'test']
+    if is_val_table:
+        tables_list.append('val')
+    for table_name in tables_list:
+        samples = plpy.execute(
+            f'select x_{table_name}, y_{table_name} from {table_name}_table '
+            f'join datasets d on {table_name}_table.dataset_id = d.dataset_id '
+            f'where dataset_name = \'{dataset_name}{dataset_postfix}\''
+        )
+
+        if samples.nrows() == 0:
+            plpy.info(f'No samples in {table_name}_table for dataset with name \"{dataset_name}\".')
+            return f'No samples in {table_name}_table for dataset with name \"{dataset_name}\".'
+
+        if is_val_table:
+            x_val, y_val = [], []
+        for sample in samples:
+            bytes_img = sample[f'x_{table_name}']
+            x_data = pickle.loads(bytes_img)
+            y_data = sample[f'y_{table_name}']
+
+            if table_name == 'train':
+                x_train.append(x_data)
+                y_train.append(y_data)
+            elif table_name == 'test':
+                x_test.append(x_data)
+                y_test.append(y_data)
+            elif table_name == 'val':
+                x_val.append(x_data)
+                y_val.append(y_data)
+
+    x_train = np.array(x_train)
+    y_train = np.array(y_train)
+
+    if is_val_table:
+        x_val = np.array(x_val)
+        y_val = np.array(y_val)
+    else:
+        x_val = np.array(x_test)
+        y_val = np.array(y_test)
+
+    # get amount of classes
+    classes_num = plpy.execute(
+        f'select count(distinct y_train) from train_table '
+        f'join datasets d on train_table.dataset_id = d.dataset_id '
+        f'where dataset_name = \'{dataset_name}{dataset_postfix}\';'
+    )[0]['count']
+
+    # input shape dimension for image data in format: (width, height, channels)
+    input_shape = (4, 6, 3)
+    # amount of epochs
+    epochs = 200
+    # mini-batch size
+    batch_size = 10
+
+    # amount of samples for training
+    nb_train_samples = int(len(x_train) / classes_num)
+    # amount of samples for validation
+    nb_validation_samples = int(len(x_val) / classes_num)
+
+    datagen = ImageDataGenerator()
+
+    train_generator = datagen.flow(
+        x_train,
+        y_train,
+        batch_size=batch_size
+    )
+
+    val_generator = datagen.flow(
+        x_val,
+        y_val,
+        batch_size=batch_size,
+    )
+
+    model = Sequential()
+
+    model.add(Conv2D(32, (2, 2), input_shape=input_shape))
+    model.add(Activation('relu'))
+    model.add(MaxPooling2D(pool_size=(2, 2)))
+
+    model.add(Conv2D(64, (1, 1)))
+    model.add(Activation('relu'))
+    model.add(MaxPooling2D(pool_size=(1, 1)))
+
+    model.add(Flatten())
+    model.add(Dense(20))
+    model.add(Activation('relu'))
+
+    model.add(Dropout(0.25))
+
+    model.add(Dense(8))
+    model.add(Activation('softmax'))
 
     optimizer = 'adam'
 
-    model.compile(optimizer=optimizer,
-                  loss='sparse_categorical_crossentropy',
+    model.compile(loss='sparse_categorical_crossentropy',
+                  optimizer=optimizer,
                   metrics=['accuracy'])
 
     summary = []
@@ -827,20 +912,85 @@ AS $BODY$
 
     logger = LambdaCallback(
         on_epoch_end=lambda epoch,
-        logs: plpy.notice(f"epoch: {epoch}, accuracy {logs['accuracy']:.4f}, loss: {logs['loss']:.4f}")
+        logs: plpy.notice(
+            f"epoch: {epoch + 1}, acc: {logs['accuracy']:.4f}, loss: {logs['loss']:.4f} "
+            f"val_acc: {logs['val_accuracy']:.4f}, val_loss: {logs['val_loss']:.4f}"
+        )
     )
 
     plpy.notice('create logger')
 
-    history = model.fit(x_train,
-                        y_train,
-                        epochs=6,
-                        batch_size=64,
-                        validation_data=(x_test, y_test),
+    history = model.fit(train_generator,
+                        steps_per_epoch=nb_train_samples // batch_size,
+                        validation_data=val_generator,
+                        validation_steps=nb_validation_samples // batch_size,
+                        epochs=epochs,
+                        shuffle=True,
                         verbose=False,
                         callbacks=[logger])
 
     plpy.notice('model fit complete')
+
+    acc = history.history['accuracy']
+    val_acc = history.history['val_accuracy']
+    loss = history.history['loss']
+    val_loss = history.history['val_loss']
+
+    epochs = range(len(acc))
+
+    plt.figure()
+    plt.plot(epochs,
+             acc, 'bo', label='Training acc')
+    plt.plot(epochs,
+             val_acc, color='orange', label='Validation acc')
+    plt.title('Training and validation accuracy')
+    plt.legend()
+    accuracy_path = f'D:\\saved-images\\graphs\\{model_name}-train-and-val-acc.png'
+    plt.savefig(accuracy_path, bbox_inches='tight')
+
+    plt.figure()
+    plt.plot(epochs,
+             loss, 'bo', label='Smoothed training loss')
+    plt.plot(epochs,
+             val_loss, color='orange', label='Smoothed validation loss')
+    plt.title('Training and validation loss')
+    plt.legend()
+    loss_path = f'D:\\saved-images\\graphs\\{model_name}-train-and-val-loss.png'
+    plt.savefig(loss_path, bbox_inches='tight')
+
+    def smooth_curve(points, factor=0.8):
+        smoothed_points = []
+        for point in points:
+            if smoothed_points:
+                previous = smoothed_points[-1]
+                smoothed_points.append(previous * factor + point * (1 - factor))
+            else:
+                smoothed_points.append(point)
+        return smoothed_points
+
+    plt.figure()
+    plt.plot(epochs,
+             smooth_curve(acc), 'bo', label='Training acc')
+    plt.plot(epochs,
+             smooth_curve(val_acc), color='orange', label='Validation acc')
+    plt.title('Training and validation accuracy')
+    plt.legend()
+    smooth_accuracy_path = f'D:\\saved-images\\graphs\\{model_name}-smooth-train-and-val-acc.png'
+    plt.savefig(smooth_accuracy_path, bbox_inches='tight')
+
+    plt.figure()
+    plt.plot(epochs,
+             smooth_curve(loss), 'bo', label='Training loss')
+    plt.plot(epochs,
+             smooth_curve(val_loss), color='orange', label='Validation loss')
+    plt.title('Training and validation loss')
+    plt.legend()
+    smooth_loss_path = f'D:\\saved-images\\graphs\\{model_name}-smooth-train-and-val-loss.png'
+    plt.savefig(smooth_loss_path, bbox_inches='tight')
+    plt.clf()
+    plt.close()
+
+    plpy.notice('graphs draw complete')
 
     json_config = model.to_json()
     model_weights = model.get_weights()
@@ -853,8 +1003,8 @@ AS $BODY$
     plpy.notice('json conversions complete')
 
     plpy.execute(
-        f"insert into models_table (name, optimizer, model_config, model_weights)"
-        f"values ('{model_name}', '{optimizer}', '{json_config}', '{json_weights}')"
+        f"insert into models_table (model_name, dataset_id, optimizer, model_config, model_weights)"
+        f"values ('{model_name}', {dataset_id}, '{optimizer}', '{json_config}', '{json_weights}')"
     )
 
     return 'All is OK!'
@@ -862,7 +1012,14 @@ $BODY$;
 
 TRUNCATE TABLE models_table;
 SELECT * FROM models_table;
-SELECT define_and_save_model('conv2d-2');
+SELECT * FROM datasets;
+
+SELECT define_and_save_model(
+    'haralick',
+    true,
+    true,
+    'conv2d-12'
+);
 
 CREATE OR REPLACE FUNCTION load_and_test_model(model_name text)
     RETURNS text
@@ -870,36 +1027,51 @@ CREATE OR REPLACE FUNCTION load_and_test_model(model_name text)
 AS $BODY$
     import json
     import keras
+    import pickle
     import numpy as np
     import tensorflow as tf
+    import matplotlib.pyplot as plt
+    from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 
-    def get_list_from_sql(name, table):
-        data_list = []
-        sql_data = plpy.execute(f"select {name} from {table} order by id")
-        for sample in sql_data:
-            if name not in ['y_train', 'y_test']:
-                array_img = np.ndarray(shape=(28, 28), dtype=np.float64, buffer=sample[f'{name}'])
-                data_list.append(array_img)
-            else:
-                data_list.append(list(sample.values()))
-        plpy.info(f"{name} loaded!")
-        return np.squeeze(np.asarray(data_list, dtype='float'))
-
-    models_names = plpy.execute(f"select name from models_table")
+    models_names = plpy.execute(f"select model_name from models_table")
     existing_names = []
     for sql_name in models_names:
-        existing_names.append(sql_name['name'])
+        existing_names.append(sql_name['model_name'])
 
     if model_name not in existing_names:
-        return f"Model with name '{model_name} does not exist in the database!'"
+        plpy.info(f'Model with name \'{model_name}\' does not exist in the database!')
+        return f'Model with name \'{model_name}\' does not exist in the database!'
 
-    x_test = get_list_from_sql('x_test', 'test_table')
-    y_test = get_list_from_sql('y_test', 'test_table')
+    model_dataset_id = plpy.execute(f'select dataset_id from models_table where model_name = \'{model_name}\'')[0]['dataset_id']
 
-    model_config = plpy.execute(f"select model_config from models_table where name = '{model_name}'")
+    x_test, y_test  = [], []
+    samples = plpy.execute(
+        f'select x_test, y_test from test_table '
+        f'where dataset_id = {model_dataset_id}'
+    )
+
+    if samples.nrows() == 0:
+        dataset_name = plpy.execute(
+            f'select dataset_name from datasets where dataset_id = {model_dataset_id}'
+        )[0]['dataset_name']
+        plpy.info(f'No samples in test_table for dataset with name \"{dataset_name}\".')
+        return f'No samples in test_table for dataset with name \"{dataset_name}\".'
+
+    for sample in samples:
+        bytes_img = sample[f'x_test']
+        x_data = pickle.loads(bytes_img)
+        y_data = sample[f'y_test']
+
+        x_test.append(x_data)
+        y_test.append(y_data)
+
+    x_test = np.array(x_test)
+    y_test = np.array(y_test)
+
+    model_config = plpy.execute(f"select model_config from models_table where model_name = '{model_name}'")
     new_model = keras.models.model_from_json(model_config[0]['model_config'])
 
-    model_weights = plpy.execute(f"select model_weights from models_table where name = '{model_name}'")
+    model_weights = plpy.execute(f"select model_weights from models_table where model_name = '{model_name}'")
 
     json_weights = json.loads(model_weights[0]['model_weights'])
 
@@ -908,21 +1080,54 @@ AS $BODY$
 
     new_model.set_weights(json_weights)
 
-    new_optimizer = plpy.execute(f"select optimizer from models_table where name = '{model_name}'")
+    new_optimizer = plpy.execute(f"select optimizer from models_table where model_name = '{model_name}'")
 
     new_model.compile(optimizer=new_optimizer[0]['optimizer'],
                   loss='sparse_categorical_crossentropy',
                   metrics=['accuracy'])
 
-    score = new_model.evaluate(x_test, y_test, verbose=0)
-    plpy.notice(f"Test loss: {score[0]}")
-    plpy.notice(f"Test accuracy: {score[1]}")
+    test_loss, test_acc = new_model.evaluate(x_test, y_test)
+    plpy.notice(f"Test loss: {test_loss}")
+    plpy.notice(f"Test accuracy: {test_acc}")
+
+    y_pred_raw = new_model.predict(x_test)
+
+    y_pred = np.argmax(y_pred_raw, axis=1)
+
+    cm = confusion_matrix(y_test, y_pred, labels=np.arange(0, 8, 1), normalize='true')
+    disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=np.arange(1, 9, 1))
+    fig, ax = plt.subplots(figsize=(10, 10))
+    disp.plot(cmap='Greens', ax=ax)
+    ax.set_xlabel('Предсказанные метки', fontsize=16)
+    ax.set_ylabel('Истинные метки', fontsize=16)
+    ax.set_title('Матрица ошибок', fontsize=20)
+    ax.set_xticks(np.arange(0, 8, 1), labels=np.arange(1, 9, 1), fontsize=16)
+    ax.set_yticks(np.arange(0, 8, 1), labels=np.arange(1, 9, 1), fontsize=16)
+    plt.tight_layout()
+    confusion_matrix_norm_path = f'D:\\saved-images\\graphs\\{model_name}-confusion-matrix-normalized.png'
+    plt.savefig(confusion_matrix_norm_path, bbox_inches='tight')
+    plt.clf()
+
+    cm = confusion_matrix(y_test, y_pred, labels=np.arange(0, 8, 1))
+    disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=np.arange(1, 9, 1))
+    fig, ax = plt.subplots(figsize=(10, 10))
+    disp.plot(cmap='Greens', ax=ax)
+    ax.set_xlabel('Предсказанные метки', fontsize=16)
+    ax.set_ylabel('Истинные метки', fontsize=16)
+    ax.set_title('Матрица ошибок', fontsize=20)
+    ax.set_xticks(np.arange(0, 8, 1), labels=np.arange(1, 9, 1), fontsize=16)
+    ax.set_yticks(np.arange(0, 8, 1), labels=np.arange(1, 9, 1), fontsize=16)
+    plt.tight_layout()
+    confusion_matrix_path = f'D:\\saved-images\\graphs\\{model_name}-confusion-matrix.png'
+    plt.savefig(confusion_matrix_path, bbox_inches='tight')
+    plt.clf()
+    plt.close(fig)
 
     return 'All is OK!'
 $BODY$;
 
 SELECT * FROM models_table;
-SELECT load_and_test_model('conv2d-2');
+SELECT load_and_test_model('conv2d-12');
 
 CREATE OR REPLACE FUNCTION test_random_sample(model_name text)
     RETURNS text
@@ -931,21 +1136,23 @@ AS $BODY$
     import json
     import keras
     import random
+    import pickle
     import numpy as np
     import tensorflow as tf
 
-    models_names = plpy.execute(f"select name from models_table")
+    models_names = plpy.execute(f"select model_name from models_table")
     existing_names = []
     for sql_name in models_names:
-        existing_names.append(sql_name['name'])
+        existing_names.append(sql_name['model_name'])
 
     if model_name not in existing_names:
-        return f"Model with name '{model_name} does not exist in the database!'"
+        plpy.info(f'Model with name \'{model_name}\' does not exist in the database!')
+        return f'Model with name \'{model_name}\' does not exist in the database!'
 
-    model_config = plpy.execute(f"select model_config from models_table where name = '{model_name}'")
+    model_config = plpy.execute(f"select model_config from models_table where model_name = '{model_name}'")
     new_model = keras.models.model_from_json(model_config[0]['model_config'])
 
-    model_weights = plpy.execute(f"select model_weights from models_table where name = '{model_name}'")
+    model_weights = plpy.execute(f"select model_weights from models_table where model_name = '{model_name}'")
 
     json_weights = json.loads(model_weights[0]['model_weights'])
 
@@ -954,61 +1161,92 @@ AS $BODY$
 
     new_model.set_weights(json_weights)
 
-    new_optimizer = plpy.execute(f"select optimizer from models_table where name = '{model_name}'")
+    new_optimizer = plpy.execute(f"select optimizer from models_table where model_name = '{model_name}'")
 
     new_model.compile(optimizer=new_optimizer[0]['optimizer'],
                   loss='sparse_categorical_crossentropy',
                   metrics=['accuracy'])
 
-    sample_id = random.randint(0, 9999)
-    sample = plpy.execute(f"select x_test from test_table where id = {sample_id}")
-    sample_list = []
-    for line in sample:
-        array_img = np.ndarray(shape=(28, 28), dtype=np.float64, buffer=line['x_test'])
-        sample_list.append(array_img)
-    sample_list = np.squeeze(np.asarray(sample_list, dtype='float'))
-    sample_list = sample_list.reshape(1, 28, 28)
-    plpy.execute(f"select show_sample('test', {sample_id})")
+    model_dataset_id = plpy.execute(f'select dataset_id from models_table where model_name = \'{model_name}\'')[0]['dataset_id']
 
-    predict_value = new_model.predict(sample_list)
-    count = 0
+    x_len = plpy.execute(f'select count(sample_id) from test_table where dataset_id = {model_dataset_id}')[0]['count']
+
+    sample_id = random.randint(0, x_len)
+    plpy.notice(f'random sample_id: {sample_id}')
+
+    dataset_offset = plpy.execute(f'select min(sample_id) from test_table where dataset_id = {model_dataset_id}')[0]['min'] - 1
+    plpy.notice(f'dataset_offset: {dataset_offset}')
+    plpy.notice(f'dataset_offset + sample_id: {dataset_offset + sample_id}')
+
+    samples = plpy.execute(
+        f'select x_test, y_test from test_table '
+        f'where dataset_id = {model_dataset_id} and sample_id = {dataset_offset + sample_id}'
+    )
+
+    if samples.nrows() == 0:
+        dataset_name = plpy.execute(
+            f'select dataset_name from datasets where dataset_id = {model_dataset_id}'
+        )[0]['dataset_name']
+        plpy.info(f'No samples in test_table for dataset with name \"{dataset_name}\".')
+        return f'No samples in test_table for dataset with name \"{dataset_name}\".'
+
+    x_test, y_test = [], []
+    for sample in samples:
+        bytes_img = sample[f'x_test']
+        x_data = pickle.loads(bytes_img)
+        y_data = sample[f'y_test']
+
+        x_test.append(x_data)
+        y_test.append(y_data)
+
+    x_test = np.array(x_test)
+    y_test = np.array(y_test)[0]
+
+    plpy.execute(f"select show_sample('test', {dataset_offset + sample_id}, 'gray')")
+
+    predict_value = new_model.predict(x_test)
+    count = 1
     for shell in predict_value:
         for value in shell:
             plpy.notice(f'{count} - {100 * value.astype(float):.5f}%')
             count += 1
-    digit = np.argmax(predict_value)
-    plpy.notice(f"digit = {digit}")
+    predict_result = np.argmax(predict_value)
+    plpy.notice(f"predict = {predict_result + 1}")
+    plpy.notice(f"true = {y_test + 1}")
 
-    return 'All is OK!'
+    return f"sample_id = {sample_id}, predict = {predict_result + 1}, true = {y_test + 1}"
 $BODY$;
 
+SELECT min(sample_id) FROM test_table WHERE dataset_id = 3;
 SELECT * FROM models_table;
-SELECT test_random_sample('conv2d-2');
+SELECT test_random_sample('conv2d-12');
 
-CREATE OR REPLACE FUNCTION test_handwritten_sample(model_name text)
+CREATE OR REPLACE FUNCTION test_digital_sample(
+    model_name text,
+    test_sample_id integer)
     RETURNS text
     LANGUAGE 'plpython3u'
 AS $BODY$
     import json
     import keras
+    import pickle
     import numpy as np
     import tensorflow as tf
-    from tensorflow.keras.preprocessing.image import load_img
-    from tensorflow.keras.preprocessing.image import img_to_array
-    from PIL import Image, ImageChops
+    import matplotlib.pyplot as plt
 
-    models_names = plpy.execute(f"select name from models_table")
+    models_names = plpy.execute(f"select model_name from models_table")
     existing_names = []
     for sql_name in models_names:
-        existing_names.append(sql_name['name'])
+        existing_names.append(sql_name['model_name'])
 
     if model_name not in existing_names:
-        return f"Model with name '{model_name} does not exist in the database!'"
+        plpy.info(f'Model with name \'{model_name}\' does not exist in the database!')
+        return f'Model with name \'{model_name}\' does not exist in the database!'
 
-    model_config = plpy.execute(f"select model_config from models_table where name = '{model_name}'")
+    model_config = plpy.execute(f"select model_config from models_table where model_name = '{model_name}'")
     new_model = keras.models.model_from_json(model_config[0]['model_config'])
 
-    model_weights = plpy.execute(f"select model_weights from models_table where name = '{model_name}'")
+    model_weights = plpy.execute(f"select model_weights from models_table where model_name = '{model_name}'")
 
     json_weights = json.loads(model_weights[0]['model_weights'])
 
@@ -1017,40 +1255,237 @@ AS $BODY$
 
     new_model.set_weights(json_weights)
 
-    new_optimizer = plpy.execute(f"select optimizer from models_table where name = '{model_name}'")
+    new_optimizer = plpy.execute(f"select optimizer from models_table where model_name = '{model_name}'")
 
     new_model.compile(optimizer=new_optimizer[0]['optimizer'],
                   loss='sparse_categorical_crossentropy',
                   metrics=['accuracy'])
 
-    img = load_img('D:\\generatedfiles\\sample_image.png', grayscale=True, target_size=(28, 28))
-    img = ImageChops.invert(img)
-    sample = img_to_array(img)
-    sample = sample / 255
+    plpy.notice(f'test_sample_id: {test_sample_id}')
 
-    for line in sample:
-        line_str = ''
-        for num in line:
-            if num != 0:
-                line_str += '* '
-            else:
-                line_str += '. '
-        plpy.info(line_str)
+    samples = plpy.execute(
+        f'select x_test, y_test from test_table '
+        f'where sample_id = {test_sample_id}'
+    )
 
-    sample = sample.reshape(1, 28, 28)
-    sample = sample.astype('float')
+    if samples.nrows() == 0:
+        plpy.info(f'No sample in test_table for sample_id = {test_sample_id}.')
+        return f'No sample in test_table for sample_id = {test_sample_id}.'
 
-    predict_value = new_model.predict(sample)
-    count = 0
+    x_test, y_test = [], []
+    for sample in samples:
+        bytes_img = sample[f'x_test']
+        x_data = pickle.loads(bytes_img)
+        y_data = sample[f'y_test']
+
+        x_test.append(x_data)
+        y_test.append(y_data)
+
+    x_test = np.array(x_test)
+    y_test = np.array(y_test)[0]
+
+    plpy.execute(f"select show_sample('test', {test_sample_id}, 'gray')")
+
+    predict_value = new_model.predict(x_test)
+    count = 1
     for shell in predict_value:
         for value in shell:
             plpy.notice(f'{count} - {100 * value.astype(float):.5f}%')
             count += 1
-    digit = np.argmax(predict_value)
-    plpy.notice(f"digit = {digit}")
+    predict_result = np.argmax(predict_value)
+    plpy.notice(f"predict = {predict_result + 1}")
+    plpy.notice(f"true = {y_test + 1}")
 
-    return 'All is OK!'
+    return f"sample_id = {test_sample_id}, predict = {predict_result + 1}, true = {y_test + 1}"
 $BODY$;
 
+SELECT * FROM test_table;
 SELECT * FROM models_table;
-SELECT test_handwritten_sample('conv2d-2');
+SELECT test_digital_sample(
+    'conv2d-10', 123
+);
+
+CREATE OR REPLACE FUNCTION test_original_image(
+    model_name text,
+    test_sample_id integer)
+    RETURNS text
+    LANGUAGE 'plpython3u'
+AS $BODY$
+    import json
+    import keras
+    import pickle
+    import skimage
+    import numpy as np
+    import tensorflow as tf
+    import matplotlib.pyplot as plt
+    from skimage.feature.texture import graycomatrix, graycoprops
+
+    def calc_component_features(img_component):
+        img_component = np.true_divide(img_component, 32)
+        img_component = img_component.astype(int)
+        glcm = graycomatrix(img_component, [1], [0], levels=8, symmetric=False,
+                            normed=True)
+        haralick_features = {
+            'correlation': graycoprops(glcm, 'correlation')[0, 0],
+            'contrast': graycoprops(glcm, 'contrast')[0, 0],
+            'homogeneity': graycoprops(glcm, 'homogeneity')[0, 0],
+            'energy': graycoprops(glcm, 'energy')[0, 0]
+        }
+        return haralick_features
+
+    models_names = plpy.execute(f"select model_name from models_table")
+    existing_names = []
+    for sql_name in models_names:
+        existing_names.append(sql_name['model_name'])
+
+    if model_name not in existing_names:
+        plpy.info(f'Model with name \'{model_name}\' does not exist in the database!')
+        return f'Model with name \'{model_name}\' does not exist in the database!'
+
+    model_config = plpy.execute(f"select model_config from models_table where model_name = '{model_name}'")
+    new_model = keras.models.model_from_json(model_config[0]['model_config'])
+
+    model_weights = plpy.execute(f"select model_weights from models_table where model_name = '{model_name}'")
+
+    json_weights = json.loads(model_weights[0]['model_weights'])
+
+    for i in range(len(json_weights)):
+        json_weights[i] = np.array(json_weights[i])
+
+    new_model.set_weights(json_weights)
+
+    new_optimizer = plpy.execute(f"select optimizer from models_table where model_name = '{model_name}'")
+
+    new_model.compile(optimizer=new_optimizer[0]['optimizer'],
+                  loss='sparse_categorical_crossentropy',
+                  metrics=['accuracy'])
+
+    plpy.notice(f'test_sample_id: {test_sample_id}')
+
+    sample = plpy.execute(
+        f'select x_test, y_test from test_table '
+        f'where sample_id = {test_sample_id}'
+    )
+
+    if sample.nrows() == 0:
+        plpy.info(f'No sample in test_table for sample_id = {test_sample_id}.')
+        return f'No sample in test_table for sample_id = {test_sample_id}.'
+
+    plpy.execute(f"select show_sample('test', {test_sample_id})")
+
+    img_RED_global = []
+    img_GREEN_global = []
+    img_BLUE_global = []
+    bytes_img = sample[0][f'x_test']
+    array_img = pickle.loads(bytes_img)
+
+    img_components = {}
+
+    # RED component
+    img_red = array_img[:, :, 0]
+    img_RED_global = img_red
+    img_components['R'] = calc_component_features(img_red)
+
+    # GREEN component
+    img_green = array_img[:, :, 2]
+    img_GREEN_global = img_green
+    img_components['G'] = calc_component_features(img_green)
+
+    # BLUE component
+    img_blue = array_img[:, :, 0]
+    img_BLUE_global = img_blue
+    img_components['B'] = calc_component_features(img_blue)
+
+    # RED-GREEN component
+    img_r_g = img_RED_global - img_GREEN_global
+    img_components['RG'] = calc_component_features(img_r_g)
+
+    # RED-BLUE component
+    img_r_b = img_RED_global - img_BLUE_global
+    img_components['RB'] = calc_component_features(img_r_b)
+
+    # GREEN-BLUE component
+    img_g_b = img_GREEN_global - img_BLUE_global
+    img_components['GB'] = calc_component_features(img_g_b)
+
+    # construct an image
+    preprocessed_image = np.zeros([4, 6])
+    comp_index = 0
+    for component in img_components.values():
+        feature_index = 0
+        for key, val in component.items():
+            preprocessed_image[feature_index][comp_index] = val
+            feature_index += 1
+        comp_index += 1
+
+    # save image
+    fig = plt.figure(frameon=False)
+    fig.set_size_inches(0.06, 0.04)
+    ax = plt.Axes(fig, [0., 0., 1., 1.])
+    ax.set_axis_off()
+    fig.add_axes(ax)
+    ax.imshow(preprocessed_image, aspect='auto', cmap='Greys')
+    image_path = 'D:\\saved-images\\digital_image.png'
+    plt.savefig(image_path)
+    plt.close(fig)
+
+    digital_image = plt.imread(image_path)[:,:,:3]
+    digital_image = np.array([digital_image])
+    y_label = sample[0]['y_test']
+
+    model_dataset_id = plpy.execute(f'select dataset_id from models_table where model_name = \'{model_name}\'')[0]['dataset_id']
+
+    class_samples = []
+    samples_train = plpy.execute(
+        f'select x_train from train_table '
+        f'where dataset_id = {model_dataset_id} and y_train = \'{y_label}\''
+    )
+    class_samples += samples_train
+
+    samples_test = plpy.execute(
+        f'select x_test from test_table '
+        f'where dataset_id = {model_dataset_id} and y_test = \'{y_label}\''
+    )
+    class_samples += samples_test
+
+    samples_val = plpy.execute(
+        f'select x_val from val_table '
+        f'where dataset_id = {model_dataset_id} and y_val = \'{y_label}\''
+    )
+    class_samples += samples_val
+
+    total_class_img = [[0., 0., 0., 0., 0., 0.] for _ in range(4)]
+    for sample in class_samples:
+        bytes_img = None
+        table_name = ''
+        if sample.get('x_train') is not None:
+            bytes_img = sample.get('x_train')
+        elif sample.get('x_test') is not None:
+            bytes_img = sample.get('x_test')
+        elif sample.get('x_val') is not None:
+            bytes_img = sample.get('x_val')
+        array_img = pickle.loads(bytes_img)
+
+        # get average digital image
+        for i in range(len(array_img)):
+            for j in range(len(array_img[0])):
+                total_class_img[i][j] += array_img[i][j]
+
+    total_class_img += digital_image
+    average_img = np.true_divide(total_class_img, 151)
+
+    predict_value = new_model.predict(average_img)
+    count = 1
+    for shell in predict_value:
+        for value in shell:
+            plpy.notice(f'{count} - {100 * value.astype(float):.5f}%')
+            count += 1
+    predict_result = np.argmax(predict_value)
+    plpy.notice(f"predict = {predict_result + 1}")
+
+    return f"sample_id = {test_sample_id}, predict = {predict_result + 1}"
+$BODY$;
+
+SELECT * FROM test_table;
+SELECT * FROM models_table;
+SELECT test_original_image('conv2d-12', 1);

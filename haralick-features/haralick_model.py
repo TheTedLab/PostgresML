@@ -1,6 +1,9 @@
 import os
-import matplotlib.pyplot as plt
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 from keras.preprocessing.image import ImageDataGenerator
 from tensorflow.python.keras.models import Sequential
 from tensorflow.python.keras.layers import Conv2D, MaxPooling2D
@@ -19,13 +22,69 @@ input_shape = (img_width, img_height, 3)
 # Количество эпох
 epochs = 200
 # Размер мини-выборки
-batch_size = 2
+batch_size = 10
 # Количество изображений для обучения
 nb_train_samples = 100
 # Количество изображений для проверки
 nb_validation_samples = 30
 # Количество изображений для тестирования
 nb_test_samples = 320
+
+x_train, y_train = [], []
+for image_dir in range(1, 9):
+    print(image_dir)
+    for image_number in range(1, 101):
+        image_path = f'{train_dir}/{image_dir}/{image_number}.png'
+        image = plt.imread(image_path)[:,:,:3]
+        x_train.append(image)
+        y_train.append(image_dir)
+
+x_train = np.array(x_train)
+y_train = np.array(y_train)
+
+x_test, y_test = [], []
+for image_dir in range(1, 9):
+    print(image_dir)
+    for image_number in range(101, 121):
+        image_path = f'{test_dir}/{image_dir}/{image_number}.png'
+        image = plt.imread(image_path)[:,:,:3]
+        x_test.append(image)
+        y_test.append(image_dir)
+
+x_test = np.array(x_test)
+y_test = np.array(y_test)
+
+x_val, y_val = [], []
+for image_dir in range(1, 9):
+    print(image_dir)
+    for image_number in range(121, 151):
+        image_path = f'{val_dir}/{image_dir}/{image_number}.png'
+        image = plt.imread(image_path)[:, :, :3]
+        x_val.append(image)
+        y_val.append(image_dir)
+
+x_val = np.array(x_val)
+y_val = np.array(y_val)
+
+datagen = ImageDataGenerator()
+
+train_generator = datagen.flow(
+    x_train,
+    y_train,
+    batch_size=batch_size
+)
+
+test_generator = datagen.flow(
+    x_test,
+    y_test,
+    batch_size=batch_size,
+)
+
+val_generator = datagen.flow(
+    x_val,
+    y_val,
+    batch_size=batch_size,
+)
 
 model = Sequential()
 
@@ -51,26 +110,6 @@ model.compile(loss='sparse_categorical_crossentropy',
               metrics=['acc'])
 
 model.summary()
-
-datagen = ImageDataGenerator(rescale=1. / 255)
-
-train_generator = datagen.flow_from_directory(
-    train_dir,
-    target_size=(img_width, img_height),
-    batch_size=batch_size,
-    class_mode='sparse')
-
-val_generator = datagen.flow_from_directory(
-    val_dir,
-    target_size=(img_width, img_height),
-    batch_size=batch_size,
-    class_mode='sparse')
-
-test_generator = datagen.flow_from_directory(
-    test_dir,
-    target_size=(img_width, img_height),
-    batch_size=batch_size,
-    class_mode='sparse')
 
 history = model.fit(
     train_generator,
@@ -139,6 +178,92 @@ plt.legend()
 
 plt.savefig('graphs/final-smooth-haralick-model-train-and-val-loss.png', bbox_inches='tight')
 plt.show()
+plt.clf()
 
 test_loss, test_acc = model.evaluate(test_generator, steps=nb_test_samples // batch_size)
 print("Loss: ", test_loss, "Accuracy:", test_acc)
+
+y_pred_raw = model.predict(x_test)
+
+y_pred = np.argmax(y_pred_raw, axis=1)
+
+cm = confusion_matrix(y_test, y_pred, labels=np.arange(1, 9, 1), normalize='true')
+disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=np.arange(1, 9, 1))
+fig, ax = plt.subplots(figsize=(10, 10))
+disp.plot(cmap='Greens', ax=ax)
+ax.set_xlabel('Предсказанные метки', fontsize=16)
+ax.set_ylabel('Истинные метки', fontsize=16)
+ax.set_title('Матрица ошибок', fontsize=20)
+ax.set_xticks(np.arange(0, 8, 1), labels=np.arange(1, 9, 1), fontsize=16)
+ax.set_yticks(np.arange(0, 8, 1), labels=np.arange(1, 9, 1), fontsize=16)
+plt.tight_layout()
+plt.savefig(f'graphs/confusion-matrix-normalized.png', bbox_inches='tight')
+plt.show()
+plt.clf()
+
+cm = confusion_matrix(y_test, y_pred, labels=np.arange(1, 9, 1))
+disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=np.arange(1, 9, 1))
+fig, ax = plt.subplots(figsize=(10, 10))
+disp.plot(cmap='Greens', ax=ax)
+ax.set_xlabel('Предсказанные метки', fontsize=16)
+ax.set_ylabel('Истинные метки', fontsize=16)
+ax.set_title('Матрица ошибок', fontsize=20)
+ax.set_xticks(np.arange(0, 8, 1), labels=np.arange(1, 9, 1), fontsize=16)
+ax.set_yticks(np.arange(0, 8, 1), labels=np.arange(1, 9, 1), fontsize=16)
+plt.tight_layout()
+plt.savefig(f'graphs/confusion-matrix.png', bbox_inches='tight')
+plt.show()
+plt.clf()
+plt.close(fig)
+
+
+epochs_x, acc_y, val_acc_y, loss_y, val_loss_y = [], [], [], [], []
+
+def animate(i):
+    print(i)
+    if i % 6 == 0 and i < 1200:
+        epochs_x.append(epochs[i // 6])
+        acc_y.append(acc[i // 6])
+        val_acc_y.append(val_acc[i // 6])
+        loss_y.append(loss[i // 6])
+        val_loss_y.append(val_loss[i // 6])
+
+    plt.clf()
+    plt.subplot(2, 2, 1)
+    plt.plot(epochs_x, smooth_curve(acc_y), 'bo', label='Training acc')
+    plt.plot(epochs_x, smooth_curve(val_acc_y), color='orange', label='Validation acc')
+    # plt.xlim([0, 200])
+    # plt.ylim([0.0, 1.0])
+    plt.legend(loc='lower right')
+    plt.title('Training and validation accuracy')
+
+    plt.subplot(2, 2, 2)
+    plt.plot(epochs_x, smooth_curve(loss_y), 'bo', label='Training loss')
+    plt.plot(epochs_x, smooth_curve(val_loss_y), color='orange', label='Validation loss')
+    # plt.xlim([0, 200])
+    # plt.ylim([0.0, 3.0])
+    plt.legend(loc='lower left')
+    plt.title('Training and validation loss')
+
+    plt.subplot(2, 2, 3)
+    plt.plot(epochs_x, acc_y, 'bo', label='Training acc')
+    plt.plot(epochs_x, val_acc_y, color='orange', label='Validation acc')
+    # plt.xlim([0, 200])
+    # plt.ylim([0.0, 1.0])
+    plt.legend(loc='lower right')
+    plt.title('Training and validation accuracy')
+
+    plt.subplot(2, 2, 4)
+    plt.plot(epochs_x, loss_y, 'bo', label='Training loss')
+    plt.plot(epochs_x, val_loss_y, color='orange', label='Validation loss')
+    # plt.xlim([0, 200])
+    # plt.ylim([0.0, 3.0])
+    plt.legend(loc='lower left')
+    plt.title('Training and validation loss')
+    plt.tight_layout()
+
+
+fig = plt.figure(figsize=(19.2, 10.8), dpi=100)
+ani = FuncAnimation(fig, animate, frames=1500, interval=1000)
+
+ani.save('results.mp4', writer = 'ffmpeg', fps = 60)
