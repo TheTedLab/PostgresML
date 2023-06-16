@@ -772,7 +772,8 @@ CREATE OR REPLACE FUNCTION define_and_save_model(
     dataset_name text,
     is_val_table boolean,
     is_noised_data boolean,
-    model_name text)
+    model_name text,
+    config_path text)
     RETURNS text
     LANGUAGE 'plpython3u'
 AS $BODY$
@@ -1018,7 +1019,8 @@ SELECT define_and_save_model(
     'haralick',
     true,
     true,
-    'conv2d-12'
+    'wheat-network',
+    'D:\\configs\\model_arch.yaml'
 );
 
 CREATE OR REPLACE FUNCTION load_and_test_model(model_name text)

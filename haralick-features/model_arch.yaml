@@ -29,4 +29,5 @@ model_architecture:
       rate: 0.25
     - type: 'dense'
       units: *classes
+      activation: 'softmax'
 
