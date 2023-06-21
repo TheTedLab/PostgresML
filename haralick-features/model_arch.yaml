@@ -21,6 +21,8 @@ model_architecture:
       filters: 64
       kernel-size: [1, 1]
       activation: 'relu'
+    - type: 'max-pooling2d'
+      pool-size: [1, 1]
     - type: 'flatten'
     - type: 'dense'
       units: 20

@@ -46,6 +46,21 @@ CREATE TABLE IF NOT EXISTS models_table
     model_weights jsonb
 );
 
+SELECT tf_version();
+SELECT show_sample('train', 81,
+    'gray');
+SELECT load_dataset('D:\\haralick-dataset',
+    'haralick',true);
+SELECT glcm_digitization('haralick', true);
+SELECT noise_generation('haralick',true,
+    0.032,10);
+SELECT define_and_save_model('haralick',true,
+    true,'wheat-network',
+    'D:\\configs\\model_arch.yaml');
+SELECT load_and_test_model('conv2d-12');
+SELECT test_digital_sample('conv2d-10', 123);
+SELECT test_original_image('conv2d-12', 1);
+
 CREATE OR REPLACE FUNCTION python_path()
 RETURNS text
 LANGUAGE 'plpython3u'
