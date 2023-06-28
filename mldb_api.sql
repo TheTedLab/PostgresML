@@ -94,6 +94,8 @@ CREATE OR REPLACE FUNCTION tf_version()
 RETURNS text
 LANGUAGE 'plpython3u'
 AS $BODY$
+    import os
+    os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
     import tensorflow as tf
     plpy.notice(tf.config.list_physical_devices('GPU'))
     gpu_devices = tf.config.list_physical_devices('GPU')
