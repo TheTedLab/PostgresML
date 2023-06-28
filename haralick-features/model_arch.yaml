@@ -1,0 +1,35 @@
+train_settings:
+  num_classes: &classes 8
+  input_shape:
+    width: 4
+    height: 6
+    channels: 3
+  epochs: 200
+  optimizer: 'adam'
+  batch-size: 10
+
+model_architecture:
+  model-base: 'sequential'
+  layers:
+    - type: 'conv2d'
+      filters: 32
+      kernel-size: [2, 2]
+      activation: 'relu'
+    - type: 'max-pooling2d'
+      pool-size: [2, 2]
+    - type: 'conv2d'
+      filters: 64
+      kernel-size: [1, 1]
+      activation: 'relu'
+    - type: 'max-pooling2d'
+      pool-size: [1, 1]
+    - type: 'flatten'
+    - type: 'dense'
+      units: 20
+      activation: 'relu'
+    - type: 'dropout'
+      rate: 0.25
+    - type: 'dense'
+      units: *classes
+      activation: 'softmax'
+

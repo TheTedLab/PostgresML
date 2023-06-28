@@ -46,6 +46,21 @@ CREATE TABLE IF NOT EXISTS models_table
     model_weights jsonb
 );
 
+SELECT tf_version();
+SELECT show_sample('train', 81,
+    'gray');
+SELECT load_dataset('D:\\haralick-dataset',
+    'haralick',true);
+SELECT glcm_digitization('haralick', true);
+SELECT noise_generation('haralick',true,
+    0.032,10);
+SELECT define_and_save_model('haralick',true,
+    true,'wheat-network',
+    'D:\\configs\\model_arch.yaml');
+SELECT load_and_test_model('conv2d-12');
+SELECT test_digital_sample('conv2d-10', 123);
+SELECT test_original_image('conv2d-12', 1);
+
 CREATE OR REPLACE FUNCTION python_path()
 RETURNS text
 LANGUAGE 'plpython3u'
@@ -79,6 +94,8 @@ CREATE OR REPLACE FUNCTION tf_version()
 RETURNS text
 LANGUAGE 'plpython3u'
 AS $BODY$
+    import os
+    os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
     import tensorflow as tf
     plpy.notice(tf.config.list_physical_devices('GPU'))
     gpu_devices = tf.config.list_physical_devices('GPU')
@@ -772,7 +789,8 @@ CREATE OR REPLACE FUNCTION define_and_save_model(
     dataset_name text,
     is_val_table boolean,
     is_noised_data boolean,
-    model_name text)
+    model_name text,
+    config_path text)
     RETURNS text
     LANGUAGE 'plpython3u'
 AS $BODY$
@@ -1018,7 +1036,8 @@ SELECT define_and_save_model(
     'haralick',
     true,
     true,
-    'conv2d-12'
+    'wheat-network',
+    'D:\\configs\\model_arch.yaml'
 );
 
 CREATE OR REPLACE FUNCTION load_and_test_model(model_name text)
