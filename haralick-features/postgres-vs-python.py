@@ -2,6 +2,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.animation import FuncAnimation
 
+user_name = 'your_user_name'
+plt.rcParams['animation.ffmpeg_path'] = f'C:\\Users\\{user_name}\\ffmpeg\\bin\\ffmpeg.exe'
 plt.style.use("seaborn")
 
 data = [
@@ -18,8 +20,8 @@ for i in range(len(data[0])):
     bar_data[0].append(data[0][i] / data[1][i])
 
 columns = (
-    'Загрузка набора\nданных', 'Создание цифровых\nобразов', 'Внесение\nшума',
-    'Создание\nмодели', 'Обучение\nмодели', 'Тестирование\nмодели'
+    'Loading\ndataset', 'Digital image\ncreation', 'Noise\ninjection',
+    'Model\ncreation', 'Model\ntraining', 'Model\ntesting'
 )
 rows = ['Postgres + PL/Python', 'Python']
 
@@ -36,10 +38,10 @@ rects_1 = plt.bar(index + 0.12, bar_data[0], bar_width, bottom=y_offset, color=c
 plt.bar_label(rects_1, fmt='%.1f', fontsize=20)
 plt.legend(loc='upper center', ncols=2, fontsize=20)
 
-plt.ylabel(f"Уменьшение времени выполнения, кол-во раз", fontdict={'fontsize': 20})
+plt.ylabel(f"Reduced execution time, number of times", fontdict={'fontsize': 20})
 plt.yticks(values, fontsize=20)
 plt.xticks(index, columns, fontsize=20)
-plt.title('Сравнение времени ML задач в Python и Postgres + PL/Python (больше лучше)', fontdict={'fontsize': 20})
+plt.title('Comparison of ML task times in Python and Postgres + PL/Python (more is better)', fontdict={'fontsize': 20})
 plt.tight_layout()
 plt.savefig('graphs/postgres-vs-python-graph.png', bbox_inches='tight')
 plt.show()
@@ -54,10 +56,10 @@ rects_3 = plt.bar(index + 0.12, [x / 1000.0 for x in data[1]], bar_width, bottom
 plt.bar_label(rects_3, fmt='%.1f', fontsize=20)
 plt.legend(loc='upper center', ncols=2, fontsize=20)
 
-plt.ylabel(f"Время выполнения, секунды", fontdict={'fontsize': 20})
+plt.ylabel(f"Execution time, seconds", fontdict={'fontsize': 20})
 plt.yticks(values, fontsize=20)
 plt.xticks(index, columns, fontsize=20)
-plt.title('Сравнение времени ML задач в Python и Postgres + PL/Python (меньше лучше)', fontdict={'fontsize': 20})
+plt.title('Comparison of ML task times in Python and Postgres + PL/Python (less is better)', fontdict={'fontsize': 20})
 plt.tight_layout()
 plt.savefig('graphs/postgres-vs-python-graph-s.png', bbox_inches='tight')
 plt.show()
@@ -91,6 +93,8 @@ y_dict = {
 }
 
 fig = plt.figure(figsize=(19.2, 10.8), dpi=100)
+
+
 def animate_one(i):
     print(i)
     plt.clf()
@@ -136,13 +140,14 @@ def animate_one(i):
     plt.bar_label(rect11, fmt='%1.1f', fontsize=20)
 
     plt.legend(loc='upper center', ncols=2, fontsize=20)
-    plt.ylabel(f"Уменьшение времени выполнения, кол-во раз", fontdict={'fontsize': 20})
+    plt.ylabel(f"Reduced execution time, number of times", fontdict={'fontsize': 20})
     plt.xticks([0.5, 1.5, 2.5, 3.5, 4.5, 5.5], columns, fontsize=20)
     plt.yticks(values, fontsize=20)
-    plt.title('Сравнение времени ML задач в Python и Postgres + PL/Python (больше лучше)', fontdict={'fontsize': 20})
+    plt.title('Comparison of ML task times in Python and Postgres + PL/Python (more is better)', fontdict={'fontsize': 20})
     plt.ylim([0, 18])
     plt.xlim([0.0, 6.0])
     plt.tight_layout()
+
 
 ani = FuncAnimation(fig, animate_one, frames=240, interval=10)
 ani.save('postgres-vs-python.mp4', writer='ffmpeg', fps=60)
@@ -176,6 +181,8 @@ y_dict = {
 }
 
 fig = plt.figure(figsize=(19.2, 10.8), dpi=100)
+
+
 def animate_two(i):
     print(i)
     plt.clf()
@@ -221,13 +228,14 @@ def animate_two(i):
     plt.bar_label(rect11, fmt='%1.1f', fontsize=20)
 
     plt.legend(loc='upper center', ncols=2, fontsize=20)
-    plt.ylabel(f"Время выполнения, секунды", fontdict={'fontsize': 20})
+    plt.ylabel(f"Execution time, seconds", fontdict={'fontsize': 20})
     plt.xticks([0.5, 1.5, 2.5, 3.5, 4.5, 5.5], columns, fontsize=20)
     plt.yticks(values, fontsize=20)
-    plt.title('Сравнение времени ML задач в Python и Postgres + PL/Python (меньше лучше)', fontdict={'fontsize': 20})
+    plt.title('Comparison of ML task times in Python and Postgres + PL/Python (less is better)', fontdict={'fontsize': 20})
     plt.ylim([0, 54])
     plt.xlim([0.0, 6.0])
     plt.tight_layout()
+
 
 ani = FuncAnimation(fig, animate_two, frames=240, interval=10)
 ani.save('postgres-vs-python-s.mp4', writer='ffmpeg', fps=60)
